@@ -14,7 +14,7 @@ vad_threshold = 0.5
 end_of_speech_silence = 0.1
 
 [remote_mic]
-bind = "0.0.0.0"
+bind = "100.126.232.8"
 port = 8091
 
 [stt]
@@ -35,10 +35,10 @@ bind = "127.0.0.1"
 port = 47800
 
 [site]
-bind = "127.0.0.1"
+bind = "100.126.232.8"
 port = 8090
 
 [log]
 directory = "../logs"
-save_audio = false
+save_audio = true
 gpu_interval = 2.0
