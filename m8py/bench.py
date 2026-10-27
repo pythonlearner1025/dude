@@ -17,11 +17,15 @@ from .fakegame import FakeGame, check_invariants
 from .trace import generate_report
 
 
-async def _wait_site(url: str, timeout: float = 30) -> dict[str, Any]:
+async def _wait_site(
+    url: str, timeout: float = 30, process: asyncio.subprocess.Process | None = None
+) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     last = ""
     async with aiohttp.ClientSession() as client:
         while time.monotonic() < deadline:
+            if process and process.returncode is not None:
+                raise RuntimeError(f"m8py exited during startup with status {process.returncode}")
             try:
                 async with client.get(url.rstrip("/") + "/trace") as response:
                     if response.status == 200:
@@ -35,6 +39,7 @@ async def _wait_site(url: str, timeout: float = 30) -> dict[str, Any]:
 
 async def _capture(process: asyncio.subprocess.Process, path: Path) -> None:
     assert process.stdout
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         while line := await process.stdout.readline():
             text = line.decode(errors="replace")
@@ -158,6 +163,7 @@ async def run_benchmark(
     processes: list[asyncio.subprocess.Process] = []
     captures: list[asyncio.Task[None]] = []
     mock_log = cfg.log.directory / "bench-mocks.log"
+    startup_log = cfg.log.directory / f"bench-m8py-{time.time_ns()}.log"
     try:
         if mocks:
             mock = await _start_mocks(cfg)
@@ -174,11 +180,12 @@ async def run_benchmark(
                 stderr=asyncio.subprocess.STDOUT,
             )
             processes.append(process)
-        live = await _wait_site(site_url, timeout=60)
+            captures.append(asyncio.create_task(_capture(process, startup_log)))
+        live = await _wait_site(site_url, timeout=60, process=None if running else process)
         session_dir = cfg.log.directory / str(live["session"])
         m8_log = session_dir / "m8py.log"
         if not running:
-            captures.append(asyncio.create_task(_capture(process, m8_log)))
+            startup_log.replace(m8_log)
         fake = FakeGame(
             scenario,
             session_dir,
