@@ -1,0 +1,66 @@
+{
+  "name": "smoke",
+  "duration": 60,
+  "state_rate_hz": 2,
+  "speech_cooldown": 2,
+  "settle": 6,
+  "action_consequence_delay": 1.5,
+  "view": {
+    "file": "fixtures/view.png",
+    "spots": [
+      {"id": 1, "x": 0.188, "y": 0.688, "metres": 11},
+      {"id": 2, "x": 0.438, "y": 0.603, "metres": 19},
+      {"id": 3, "x": 0.813, "y": 0.773, "metres": 7}
+    ]
+  },
+  "initial_state": {
+    "level": "a30",
+    "in_combat": false,
+    "on_radio": false,
+    "state": "Kevin: unhurt, shields full, holding an assault rifle (60 rounds loaded, spare ammo), a pistol on his back (12 rounds loaded, spare ammo), 2 frag and 0 plasma grenades. {player}: close by ahead, unhurt, shields full. Enemies: none.",
+    "actions": [
+      {"name": "follow", "description": "follows {player}"},
+      {"name": "shoot_chief", "description": "turns his gun on {player}"},
+      {"name": "switch_weapon", "description": "switches to his pistol"},
+      {"name": "search_weapons", "description": "looks around for weapons", "result": "none nearby"},
+      {"name": "search_vehicles", "description": "looks around for vehicles", "result": "none nearby"},
+      {"name": "go_to", "description": "goes to a spot {player} can see", "view": "choose"},
+      {"name": "go_aim", "description": "goes where {player} is aiming, 14 m from {player}"},
+      {"name": "jump", "description": "jumps"},
+      {"name": "crouch", "description": "crouches"},
+      {"name": "look", "description": "takes a look at something {player} wants him to see", "view": "describe"},
+      {"name": "flashlight", "description": "switches his flashlight on"}
+    ]
+  },
+  "timeline": [
+    {"at": 2, "kind": "player_text", "text": "Kevin, follow me."},
+    {"at": 9, "kind": "dialogue", "file": "fixtures/nice-shot.wav", "speaker": "Cortana", "radio": true, "react": false},
+    {"at": 13, "kind": "state", "update": {
+      "in_combat": true,
+      "state": "Kevin: unhurt, shields holding, holding an assault rifle (48 rounds loaded, spare ammo), a pistol on his back (12 rounds loaded, spare ammo), 2 frag and 0 plasma grenades, following {player}. {player}: nearby behind, unhurt, shields full. Enemies: grunt close (8 m) ahead, in sight, unhurt; grunt at mid range (18 m) to the left, out of sight, unhurt.",
+      "actions": [
+        {"name": "stay", "description": "stays where he is"},
+        {"name": "shoot", "description": "shoots at an enemy", "options": {"417": "grunt close (8 m) ahead, in sight, unhurt", "522": "grunt at mid range (18 m) to the left, out of sight, unhurt"}},
+        {"name": "rush", "description": "rushes an enemy", "options": {"417": "grunt close (8 m) ahead, in sight, unhurt", "522": "grunt at mid range (18 m) to the left, out of sight, unhurt"}},
+        {"name": "cover", "description": "takes cover"},
+        {"name": "fall_back", "description": "falls back"},
+        {"name": "frag_grenade", "description": "throws a frag grenade", "options": {"417": "grunt close (8 m) ahead, in sight, unhurt"}},
+        {"name": "search_weapons", "description": "looks around for weapons", "result": "shotgun (4 m) to the right", "then": [{"name": "pick_up", "description": "picks up a weapon", "options": {"88": "shotgun (4 m) to the right"}}]},
+        {"name": "go_to", "description": "goes to a spot {player} can see", "view": "choose"},
+        {"name": "look", "description": "takes a look at something {player} wants him to see", "view": "describe"}
+      ]
+    }},
+    {"at": 13.1, "kind": "event", "text": "Enemies came into view: two grunts ahead."},
+    {"at": 22, "kind": "event", "text": "Kevin killed a grunt.", "react": false},
+    {"at": 27, "kind": "player_wav", "file": "fixtures/grab-shotgun.wav"},
+    {"at": 36, "kind": "state", "update": {
+      "in_combat": false,
+      "state": "Kevin: unhurt, shields full, holding a shotgun (8 rounds loaded, spare ammo), an assault rifle on his back (42 rounds loaded, spare ammo), 2 frag and 0 plasma grenades, following {player}. {player}: close by ahead, unhurt, shields full. Enemies: none."
+    }},
+    {"at": 38, "kind": "player_text", "text": "What do you see over there? Pick us a route."},
+    {"at": 47, "kind": "saved", "id": "a30:18452"},
+    {"at": 50, "kind": "direct", "text": "remember the blue-lit tunnel"},
+    {"at": 55, "kind": "loaded", "id": "a30:18452"},
+    {"at": 59, "kind": "event", "text": "New objective: Find the Silent Cartographer.", "react": true}
+  ]
+}

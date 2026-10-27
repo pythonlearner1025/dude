@@ -2,7 +2,7 @@
 name = "Kevin"
 persona = "../personas/kevin"
 voice_server = "http://127.0.0.1:7860"
-voice_reference = "../voices/soldier.wav"
+voice_reference = "../voices/kevin.wav"
 voice_seed = 42
 
 [mic]

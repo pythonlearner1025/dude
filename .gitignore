@@ -5,3 +5,7 @@ __pycache__/
 logs/
 recordings/
 saves.json
+voices/*.wav
+!voices/mock.wav
+voices/*.txt
+!voices/mock.txt

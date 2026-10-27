@@ -1,0 +1,52 @@
+{
+  "name": "combat",
+  "duration": 120,
+  "state_rate_hz": 2,
+  "speech_cooldown": 1,
+  "settle": 8,
+  "action_consequence_delay": 2,
+  "view": {"file": "fixtures/view.png"},
+  "initial_state": {
+    "level": "a30",
+    "in_combat": true,
+    "on_radio": false,
+    "state": "Kevin: a bit hurt, shields low, holding a plasma rifle (magazine empty, no spare ammo), an assault rifle on his back (36 rounds loaded, spare ammo), 1 frag and 2 plasma grenades, shooting at the elite, crouching. {player}: nearby behind, hurt, shields down. Enemies: elite close (9 m) ahead, in sight, a bit hurt, shields holding; grunt at mid range (18 m) to the left, out of sight, unhurt.",
+    "actions": [
+      {"name": "follow", "description": "follows {player}"},
+      {"name": "shoot", "description": "shoots at an enemy", "options": {"417": "elite close (9 m) ahead, in sight, a bit hurt, shields holding", "522": "grunt at mid range (18 m) to the left, out of sight, unhurt"}},
+      {"name": "hold_fire", "description": "stops shooting at the elite"},
+      {"name": "rush", "description": "rushes an enemy", "options": {"417": "elite close (9 m) ahead, in sight, a bit hurt, shields holding", "522": "grunt at mid range (18 m) to the left, out of sight, unhurt"}},
+      {"name": "cover", "description": "takes cover"},
+      {"name": "fall_back", "description": "falls back"},
+      {"name": "frag_grenade", "description": "throws a frag grenade", "options": {"417": "elite close (9 m) ahead, in sight, a bit hurt, shields holding"}},
+      {"name": "plasma_grenade", "description": "sticks a plasma grenade on an enemy", "options": {"417": "elite close (9 m) ahead, in sight, a bit hurt, shields holding"}},
+      {"name": "switch_weapon", "description": "switches to his assault rifle"},
+      {"name": "search_weapons", "description": "looks around for weapons", "result": "shotgun (4 m) to the right", "then": [{"name": "pick_up", "description": "picks up a weapon", "options": {"88": "shotgun (4 m) to the right"}}]},
+      {"name": "go_to", "description": "goes to a spot {player} can see", "view": "choose"},
+      {"name": "stand_up", "description": "stands up"},
+      {"name": "look", "description": "takes a look at something {player} wants him to see", "view": "describe"}
+    ]
+  },
+  "timeline": [
+    {"at": 1, "kind": "event", "text": "Enemies came into view: an elite and a grunt ahead."},
+    {"at": 8, "kind": "event", "text": "Kevin is taking heavy fire."},
+    {"at": 14, "kind": "dialogue", "file": "fixtures/nice-shot.wav", "speaker": "Cortana", "radio": true, "react": true},
+    {"at": 20, "kind": "player_wav", "file": "fixtures/hold-fire.wav"},
+    {"at": 28, "kind": "event", "text": "{player}'s shields went down. Kevin's shields broke."},
+    {"at": 35, "kind": "player_text", "text": "Light them up, Kevin."},
+    {"at": 42, "kind": "event", "text": "Kevin killed an elite."},
+    {"at": 48, "kind": "dialogue", "file": "fixtures/nice-shot.wav", "speaker": "the Sergeant", "radio": true, "react": false},
+    {"at": 54, "kind": "state", "update": {"on_radio": true, "state": "Kevin: hurt, shields down, holding an assault rifle (24 rounds loaded, spare ammo), a plasma rifle on his back (magazine empty, no spare ammo), 1 frag and 2 plasma grenades, following {player}, shooting at the grunt. {player}: far away behind, hurt, shields low. Enemies: grunt at mid range (21 m) ahead, in sight, hurt."}},
+    {"at": 56, "kind": "event", "text": "New objective: Hold this position until evac arrives."},
+    {"at": 63, "kind": "player_wav", "file": "fixtures/nice-shot.wav"},
+    {"at": 70, "kind": "event", "text": "Enemies came into view: three grunts to the right and an elite ahead."},
+    {"at": 78, "kind": "event", "text": "Kevin is badly hurt. Kevin is taking heavy fire."},
+    {"at": 84, "kind": "player_text", "text": "Fall back to me!"},
+    {"at": 91, "kind": "event", "text": "{player} killed an elite.", "react": false},
+    {"at": 96, "kind": "dialogue", "file": "fixtures/nice-shot.wav", "speaker": "Captain Keyes", "radio": true, "react": true},
+    {"at": 102, "kind": "saved", "id": "a30:22901"},
+    {"at": 106, "kind": "event", "text": "Kevin killed a grunt."},
+    {"at": 112, "kind": "player_wav", "file": "fixtures/what-see.wav"},
+    {"at": 118, "kind": "loaded", "id": "a30:22901"}
+  ]
+}
