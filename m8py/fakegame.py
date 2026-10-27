@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import struct
 import time
@@ -105,7 +106,8 @@ class FakeGame:
             await asyncio.gather(state_task, return_exceptions=True)
             if self.writer:
                 self.writer.close()
-                await self.writer.wait_closed()
+                with contextlib.suppress(ConnectionError, OSError):
+                    await self.writer.wait_closed()
             await asyncio.gather(reader_task, return_exceptions=True)
             await self._finish_audio("disconnect")
         if self._awaiting_audio_end:
