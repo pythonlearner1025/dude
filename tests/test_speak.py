@@ -15,6 +15,20 @@ class Backend:
         yield b"\0\0" * 240
 
 
+class ClosingBackend:
+    sample_rate = 24000
+
+    def __init__(self):
+        self.closed = asyncio.Event()
+
+    async def stream(self, text, how):
+        try:
+            while True:
+                yield b"\0\0" * 240
+        finally:
+            self.closed.set()
+
+
 class Link:
     def __init__(self):
         self.said = []
@@ -66,3 +80,31 @@ async def test_interrupt_drops_stale_tts_jobs(tmp_path):
     await asyncio.gather(task, return_exceptions=True)
     assert link.said == [] and link.audio == []
     await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_interrupt_closes_active_tts_stream(tmp_path):
+    speaking = Speaking()
+    speaking.begin_line()
+    generation = speaking.generation
+    backend = ClosingBackend()
+    link = Link()
+    original_send_audio = link.send_audio
+
+    async def interrupt_after_first_chunk(chunk):
+        await original_send_audio(chunk)
+        speaking.interrupt()
+
+    link.send_audio = interrupt_after_first_chunk
+    trace = Trace(tmp_path / "logs")
+    trace.start()
+    jobs = asyncio.Queue()
+    task = asyncio.create_task(run(backend, link, speaking, trace, jobs))
+    await jobs.put(SentenceJob("started", "", generation))
+
+    await asyncio.wait_for(backend.closed.wait(), 1)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await trace.close()
+
+    assert len(link.audio) == 1

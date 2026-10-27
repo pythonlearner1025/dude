@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,16 +86,18 @@ class BreezeBackend:
             await response.aclose()
             if attempt < 20:
                 await asyncio.sleep(0.1)
-        response.raise_for_status()
-        held = b""
-        async for chunk in response.aiter_bytes():
-            if chunk:
-                chunk = held + chunk
-                whole = len(chunk) // 2 * 2
-                if whole:
-                    yield chunk[:whole]
-                held = chunk[whole:]
-        await response.aclose()
+        try:
+            response.raise_for_status()
+            held = b""
+            async for chunk in response.aiter_bytes():
+                if chunk:
+                    chunk = held + chunk
+                    whole = len(chunk) // 2 * 2
+                    if whole:
+                        yield chunk[:whole]
+                    held = chunk[whole:]
+        finally:
+            await response.aclose()
 
 
 @dataclass(slots=True)
@@ -140,26 +143,27 @@ async def run(
         if job.span and "tts_request" not in job.span.data:
             job.span.mark("tts_request")
         try:
-            async for chunk in backend.stream(job.text, job.how):
-                if job.generation != speaking.generation:
-                    break
-                if first is None:
-                    first = (time.monotonic() - started) * 1000
-                    if job.span and "tts_first_audio" not in job.span.data:
-                        job.span.mark("tts_first_audio")
-                    if audio_generation != job.generation:
-                        if time.monotonic() < audio_until:
-                            await link.send_json({"type": "stop_audio"})
-                        audio_generation = job.generation
-                seconds = len(chunk) / 2 / backend.sample_rate
-                audio_until = max(audio_until, time.monotonic()) + seconds
-                speaking.extend(seconds)
-                await link.send_audio(chunk)
-                audio.extend(chunk)
-                if job.span and "first_audio_sent" not in job.span.data:
-                    job.span.mark("first_audio_sent")
-                if job.span:
-                    job.span.mark("last_audio_sent")
+            async with contextlib.aclosing(backend.stream(job.text, job.how)) as stream:
+                async for chunk in stream:
+                    if job.generation != speaking.generation:
+                        break
+                    if first is None:
+                        first = (time.monotonic() - started) * 1000
+                        if job.span and "tts_first_audio" not in job.span.data:
+                            job.span.mark("tts_first_audio")
+                        if audio_generation != job.generation:
+                            if time.monotonic() < audio_until:
+                                await link.send_json({"type": "stop_audio"})
+                            audio_generation = job.generation
+                    seconds = len(chunk) / 2 / backend.sample_rate
+                    audio_until = max(audio_until, time.monotonic()) + seconds
+                    speaking.extend(seconds)
+                    await link.send_audio(chunk)
+                    audio.extend(chunk)
+                    if job.span and "first_audio_sent" not in job.span.data:
+                        job.span.mark("first_audio_sent")
+                    if job.span:
+                        job.span.mark("last_audio_sent")
         except Exception as exc:
             error = str(exc)
         trace.add(
