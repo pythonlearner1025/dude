@@ -28,7 +28,7 @@ url = "http://127.0.0.1:8081/v1/chat/completions"
 temperature = 1.0
 
 [models]
-silero_vad = "../models/silero_vad.onnx"
+silero_vad = "../../models/silero_vad.onnx"
 
 [game]
 bind = "127.0.0.1"
