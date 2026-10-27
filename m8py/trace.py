@@ -38,8 +38,8 @@ class Trace:
         self.entries.append(entry)
         self.queue.put_nowait(("trace.jsonl", entry))
 
-    def new_span(self, trigger: str, **initial: Any) -> Span:
-        turn_id = f"{now_ms()}-{len(self._spans)+1}"
+    def new_span(self, trigger: str, turn_id: str | None = None, **initial: Any) -> Span:
+        turn_id = turn_id or f"{now_ms()}-{len(self._spans)+1}"
         span = Span(self, turn_id, trigger, initial)
         self._spans[turn_id] = span
         return span

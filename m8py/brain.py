@@ -22,7 +22,7 @@ QUIET, QUIET_EVENT, KEV_FEED_LINES, SAVES = 45.0, "It's been quiet for a while."
 
 
 @dataclass(slots=True)
-class Heard: text: str; timing: dict[str, float] = field(default_factory=dict)
+class Heard: text: str; timing: dict[str, float] = field(default_factory=dict); turn_id: str | None = None
 @dataclass(slots=True)
 class Event: text: str; react: bool = True
 @dataclass(slots=True)
@@ -132,7 +132,7 @@ class Brain:
             self.fold_over(FEED_TOKENS if quiet else FEED_MAX_TOKENS)
 
     async def on_heard(self,item:Heard)->None:
-        span=self.trace.new_span("heard",**item.timing); await self.link.send_json({"type":"heard","text":item.text})
+        span=self.trace.new_span("heard",item.turn_id,**item.timing); await self.link.send_json({"type":"heard","text":item.text})
         self.memory.feed.append(f"{self.player()}: {item.text}"); self.trace.add("heard",{"text":item.text}); await self.respond(True,span)
     async def on_events(self,events:list[Event],quiet:bool=False)->None:
         span=self.trace.new_span("quiet" if quiet else "event")

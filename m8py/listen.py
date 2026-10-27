@@ -15,7 +15,7 @@ import numpy as np
 from .config import Config
 from .link import GameLink
 from .speaking import Speaking
-from .trace import Trace
+from .trace import Trace, now_ms
 
 SAMPLE_RATE, VAD_WINDOW = 16000, 512
 MARGIN_BEFORE, MARGIN_AFTER, KEPT = 3200, 1600, 400000
@@ -60,7 +60,7 @@ class Transcriber:
 
 class Listener:
     """Silero VAD wrapper; injection points keep tests and remote/local sources identical."""
-    def __init__(self, cfg: Config, transcriber: Transcriber, input_rate: int, output: Callable[[str, dict[str, float]], Awaitable[None]], trace: Trace | None = None) -> None:
+    def __init__(self, cfg: Config, transcriber: Transcriber, input_rate: int, output: Callable[[str, dict[str, float], str], Awaitable[None]], trace: Trace | None = None) -> None:
         self.cfg, self.transcriber, self.input_rate, self.output, self.trace = cfg, transcriber, input_rate, output, trace
         self.pending=np.empty(0,np.float32); self.kept=deque(maxlen=KEPT); self.speech=bytearray(); self.active=False; self.silence=0; self.accepted=0; self.vad_origin=0
         self.threshold=cfg.mic.vad_threshold
@@ -101,14 +101,15 @@ class Listener:
                         audio=np.frombuffer(self.speech,dtype=np.float32).copy(); self.speech.clear(); self.active=False; await self._recognize(audio)
     def speech_active(self) -> bool: return bool(self._vad.is_speech_detected() if self._vad is not None else self.active)
     async def _recognize(self, audio: np.ndarray) -> None:
+        turn_id=f"{now_ms()}-mic"
         started=asyncio.get_running_loop().time()
         text=await self.transcriber.transcribe(audio)
         elapsed=(asyncio.get_running_loop().time()-started)*1000
         if self.trace and self.trace.session_dir.joinpath("audio").exists():
-            self.trace.session_dir.joinpath("audio",f"mic-{len(list(self.trace.session_dir.joinpath('audio').glob('mic-*.wav')))+1}.wav").write_bytes(wav(audio))
+            self.trace.session_dir.joinpath("audio",f"{turn_id}-mic.wav").write_bytes(wav(audio))
         if text:
             timing={"vad_speech_start":-elapsed-len(audio)/SAMPLE_RATE*1000,"vad_speech_end":-elapsed,"stt_done":0.0}
-            await self.output(text,timing)
+            await self.output(text,timing,turn_id)
 
 
 async def remote_mic_app(listener: Listener) -> web.Application:

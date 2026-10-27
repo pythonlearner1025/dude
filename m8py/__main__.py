@@ -48,7 +48,7 @@ async def run(cfg:Config)->Path:
     voice=await BreezeBackend.load(cfg,client); link=GameLink({"type":"hello","name":cfg.mate.name,"sample_rate":voice.sample_rate},events,hearing); await link.start(cfg.game.port,cfg.game.bind)
     transcriber=Transcriber(cfg.stt.url,cfg.stt.model,client); brain=Brain(cfg,link,speech,speaking,trace,inputs,client)
     site_runner=web.AppRunner(create_app(trace,brain.system_file,brain.combat,brain.radio,link,inputs)); await site_runner.setup(); await web.TCPSite(site_runner,cfg.site.bind,cfg.site.port).start()
-    listener=Listener(cfg,transcriber,16000,lambda text,timing:inputs.put(Heard(text,timing)),trace); remote_runner=None
+    listener=Listener(cfg,transcriber,16000,lambda text,timing,turn_id:inputs.put(Heard(text,timing,turn_id)),trace); remote_runner=None
     tasks=[asyncio.create_task(brain.run()),asyncio.create_task(run_speech(voice,link,speaking,trace,speech)),asyncio.create_task(gpu_sampler(trace,cfg.log.gpu_interval))]
     async def forward_events():
         while True:
@@ -91,7 +91,7 @@ async def transcribe_files(cfg:Config,paths:list[Path],simulate:bool=False)->Non
             if not simulate:
                 print(f'{path}: "{await transcriber.transcribe(samples)}"');continue
             heard=[]
-            async def output(text,timing):heard.append(text)
+            async def output(text,timing,turn_id):heard.append(text)
             listener=Listener(cfg,transcriber,48000,output);audio=resample(samples,16000,48000)
             audio=np.concatenate((audio,np.zeros(96000,np.float32)));print(f"== {path}")
             for at in range(0,len(audio),480):await listener.feed(audio[at:at+480])
