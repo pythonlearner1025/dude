@@ -210,7 +210,30 @@ class Listener:
             await self.output(text, timing, turn_id)
 
 
-async def remote_mic_app(listener: Listener) -> web.Application:
+async def process_mic_chunk(
+    listener: Listener,
+    chunk: np.ndarray | bytes,
+    speaking: Speaking,
+    link: GameLink,
+    cfg: Config,
+) -> None:
+    talking = speaking.is_speaking()
+    if link.mic_muted:
+        await listener.feed(np.empty(0, np.float32), muted=True)
+        return
+    muted = not cfg.mic.barge_in and cfg.mic.mute_while_speaking and talking
+    if isinstance(chunk, bytes):
+        await listener.feed_pcm(chunk, muted=muted)
+    else:
+        await listener.feed(chunk, muted=muted)
+    if cfg.mic.barge_in and talking and listener.speech_active():
+        speaking.interrupt()
+        await link.send_json({"type": "stop_audio"})
+
+
+async def remote_mic_app(
+    listener: Listener, speaking: Speaking, link: GameLink, cfg: Config
+) -> web.Application:
     app = web.Application()
 
     async def mic(request: web.Request) -> web.WebSocketResponse:
@@ -219,7 +242,10 @@ async def remote_mic_app(listener: Listener) -> web.Application:
         ptt = True
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
-                await listener.feed_pcm(msg.data, muted=not ptt)
+                if ptt:
+                    await process_mic_chunk(listener, msg.data, speaking, link, cfg)
+                else:
+                    await listener.feed(np.empty(0, np.float32), muted=True)
             elif msg.type == WSMsgType.TEXT:
                 try:
                     value = json.loads(msg.data)
@@ -248,16 +274,4 @@ async def run_local(listener: Listener, speaking: Speaking, link: GameLink) -> N
     with sd.InputStream(callback=callback, samplerate=rate):
         while True:
             chunk = await q.get()
-            talking = speaking.is_speaking()
-            await listener.feed(
-                chunk,
-                link.mic_muted
-                or (
-                    not listener.cfg.mic.barge_in
-                    and listener.cfg.mic.mute_while_speaking
-                    and talking
-                ),
-            )
-            if listener.cfg.mic.barge_in and talking and listener.speech_active():
-                speaking.interrupt()
-                await link.send_json({"type": "stop_audio"})
+            await process_mic_chunk(listener, chunk, speaking, link, listener.cfg)

@@ -135,7 +135,7 @@ async def run(cfg: Config) -> Path:
 
     tasks += [asyncio.create_task(forward_events()), asyncio.create_task(forward_hearing())]
     if cfg.mic.source == "remote":
-        remote_runner = web.AppRunner(await remote_mic_app(listener))
+        remote_runner = web.AppRunner(await remote_mic_app(listener, speaking, link, cfg))
         await remote_runner.setup()
         await web.TCPSite(remote_runner, cfg.remote_mic.bind, cfg.remote_mic.port).start()
         print(f"Remote mic: ws://{cfg.remote_mic.bind}:{cfg.remote_mic.port}/mic", flush=True)
