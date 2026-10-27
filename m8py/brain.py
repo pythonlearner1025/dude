@@ -349,6 +349,13 @@ class Brain:
             "ms": round((time.monotonic() - started) * 1000),
         }
         self.trace.add("kev", data)
+        chain = str(done.get("action", "nothing"))
+        if done.get("option"):
+            chain += f" {done['option']}"
+        if then_done:
+            chain += f" -> {then_done.get('action', 'nothing')}"
+        speak_note = "cooldown" if cooldown else ("speak" if speak else "quiet")
+        print(f"[kev] {chain}; {speak_note} ({data['ms']} ms)", flush=True)
         span.set(
             action=done.get("action"),
             option=done.get("option"),
@@ -414,6 +421,7 @@ class Brain:
         view = await self.link.view(2)
         if view is None:
             self.trace.add("sight", {"kind": kind, "error": "the game sent no view"})
+            print(f"[sight] {kind}: no view", flush=True)
             return "he can't see it", None
         span.mark("look_view_received")
         choose = kind == "choose"
@@ -505,6 +513,7 @@ class Brain:
                 what = clean(output)
         except Exception as exc:
             span.set_error("vision", exc)
+            print(f"[sight] {kind}: error {exc}", flush=True)
             self.trace.add(
                 "sight",
                 {
@@ -528,6 +537,10 @@ class Brain:
                 "spots": len(view.spots),
                 "ms": round((time.monotonic() - started) * 1000),
             },
+        )
+        print(
+            f"[sight] {kind}: {what} ({round((time.monotonic() - started) * 1000)} ms)",
+            flush=True,
         )
         return what, filename
 
@@ -610,6 +623,8 @@ class Brain:
                 "error": error,
             },
         )
+        total = round((time.monotonic() - started) * 1000)
+        print(f'[llm] {name}: "{line}" (first {first} ms, total {total} ms)', flush=True)
         return streaming_started
 
     async def _sentence(self, text: str, how: str, generation: int, span: Span) -> None:

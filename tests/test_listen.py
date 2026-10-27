@@ -37,6 +37,11 @@ class Link:
         self.sent.append(value)
 
 
+class Transcriber:
+    async def transcribe(self, audio):
+        return "testing"
+
+
 def test_silero_load_failure_names_model(cfg, monkeypatch):
     cfg.mic.vad = "silero"
     real_import = builtins.__import__
@@ -59,7 +64,23 @@ def test_energy_vad_is_explicit_fallback(cfg):
 
 
 @pytest.mark.asyncio
-async def test_remote_websocket_barge_in_interrupts_speech(cfg):
+async def test_stt_prints_short_timing_line(cfg, capsys):
+    cfg.mic.vad = "energy"
+    heard = []
+
+    async def output(text, timing, turn_id):
+        heard.append(text)
+
+    listener = RealListener(cfg, Transcriber(), 16000, output)
+    await listener._recognize(np.zeros(1600, np.float32))
+
+    assert heard == ["testing"]
+    line = capsys.readouterr().out.strip()
+    assert line.startswith('[stt] "testing" (') and line.endswith(" ms)")
+
+
+@pytest.mark.asyncio
+async def test_remote_websocket_barge_in_interrupts_speech(cfg, capsys):
     cfg.mic.source = "remote"
     cfg.mic.barge_in = True
     listener = Listener()
@@ -84,3 +105,4 @@ async def test_remote_websocket_barge_in_interrupts_speech(cfg):
     assert speaking.generation == 1
     assert link.sent == [{"type": "stop_audio"}]
     assert listener.chunks == [(b"\x00\x00" * 512, False)]
+    assert "[mic] barge-in" in capsys.readouterr().out

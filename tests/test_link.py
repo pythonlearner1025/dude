@@ -2,6 +2,7 @@ import asyncio
 import json
 import struct
 
+import numpy as np
 import pytest
 
 from m8py.link import KIND_HEAR, KIND_JSON, KIND_VIEW, GameLink, frame
@@ -22,7 +23,7 @@ async def test_handle_all_incoming_kinds():
         KIND_HEAR, struct.pack(">H", len(about)) + about + struct.pack("<hh", -32768, 16384)
     )
     _, samples, received_at = await hearing.get()
-    assert samples == [-1, 0.5]
+    np.testing.assert_array_equal(samples, np.array([-1, 0.5], dtype=np.float32))
     assert received_at > 0
     link._view_future = asyncio.get_running_loop().create_future()
     meta = json.dumps({"width": 1, "height": 1, "spots": []}).encode()

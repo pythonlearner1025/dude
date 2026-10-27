@@ -202,8 +202,10 @@ class Listener:
         turn_id = f"{now_ms()}-mic"
         vad_speech_end_at = time.monotonic()
         vad_speech_start_at = vad_speech_end_at - len(audio) / SAMPLE_RATE
+        started = time.monotonic()
         text = await self.transcriber.transcribe(audio)
         stt_done_at = time.monotonic()
+        print(f'[stt] "{text}" ({round((stt_done_at - started) * 1000)} ms)', flush=True)
         if self.trace and self.trace.session_dir.joinpath("audio").exists():
             self.trace.session_dir.joinpath("audio", f"{turn_id}-mic.wav").write_bytes(wav(audio))
         if text:
@@ -232,6 +234,7 @@ async def process_mic_chunk(
     else:
         await listener.feed(chunk, muted=muted)
     if cfg.mic.barge_in and talking and listener.speech_active():
+        print(f"[mic] barge-in over {cfg.mate.name}", flush=True)
         speaking.interrupt()
         await link.send_json({"type": "stop_audio"})
 

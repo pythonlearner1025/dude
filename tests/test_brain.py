@@ -85,7 +85,7 @@ async def test_role_merging(cfg, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_decide_do_which_then_speak_and_player_skip(cfg, tmp_path):
+async def test_decide_do_which_then_speak_and_player_skip(cfg, tmp_path, capsys):
     purposes = []
 
     def handler(req):
@@ -118,6 +118,7 @@ async def test_decide_do_which_then_speak_and_player_skip(cfg, tmp_path):
     span = trace.new_span("heard")
     assert await b.decide(True, False, span) is True
     assert "speak" not in purposes
+    assert "[kev]" in capsys.readouterr().out
     await client.aclose()
     await trace.close()
 
@@ -212,7 +213,7 @@ async def test_respond_finishes_span_when_kev_fails(cfg, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_say_accepts_usage_chunk_without_choices(cfg, tmp_path):
+async def test_say_accepts_usage_chunk_without_choices(cfg, tmp_path, capsys):
     usage = {"prompt_tokens": 3, "completion_tokens": 2}
     timings = {"prompt_ms": 4, "predicted_ms": 5}
     chunks = [
@@ -235,6 +236,7 @@ async def test_say_accepts_usage_chunk_without_choices(cfg, tmp_path):
     assert b.memory.feed[-1] == "Kevin: Hello."
     assert isinstance(await b.speech.get(), SentenceJob)
     assert isinstance(await b.speech.get(), EndJob)
+    assert "[llm]" in capsys.readouterr().out
     await client.aclose()
     await trace.close()
 

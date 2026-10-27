@@ -179,6 +179,9 @@ async def run(
                 "error": error,
             },
         )
+        total = round((time.monotonic() - started) * 1000)
+        first_ms = round(first) if first is not None else None
+        print(f"[tts] first {first_ms} ms, total {total} ms", flush=True)
         if trace.session_dir.joinpath("audio").exists() and audio:
             index = (
                 sum(

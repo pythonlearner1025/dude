@@ -120,7 +120,7 @@ async def test_interrupt_closes_active_tts_stream(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tts_error_is_recorded_on_span_and_end_finishes_once(tmp_path):
+async def test_tts_error_is_recorded_on_span_and_end_finishes_once(tmp_path, capsys):
     speaking = Speaking()
     speaking.begin_line()
     trace = Trace(tmp_path / "logs")
@@ -142,3 +142,4 @@ async def test_tts_error_is_recorded_on_span_and_end_finishes_once(tmp_path):
     assert span.data["error_stage"] == "tts"
     records = (trace.session_dir / "spans.jsonl").read_text().splitlines()
     assert len(records) == 1
+    assert "[tts] first" in capsys.readouterr().out

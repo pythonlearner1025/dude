@@ -144,13 +144,54 @@ async def gpu_sampler(trace: Trace, interval: float = 2.0) -> None:
                     {"memory_used_mb": int(r[0]), "utilization_percent": int(r[1])} for r in rows
                 ],
                 "processes": [
-                    {"pid": int(r[0]), "name": r[1], "memory_used_mb": int(r[2])} for r in processes
+                    {
+                        "pid": int(r[0]),
+                        "name": r[1],
+                        "cmd": process_label(int(r[0])),
+                        "memory_used_mb": int(r[2]),
+                    }
+                    for r in processes
                 ],
             }
             trace.queue.put_nowait(("gpu.jsonl", record))
         except (OSError, ValueError):
             return
         await asyncio.sleep(interval)
+
+
+def process_label(pid: int, proc_root: Path = Path("/proc")) -> str:
+    try:
+        args = [
+            value.decode(errors="replace")
+            for value in (proc_root / str(pid) / "cmdline").read_bytes().split(b"\0")
+            if value
+        ]
+    except OSError:
+        return ""
+    if not args:
+        return ""
+    executable = Path(args[0]).name
+    if "llama-server" in executable:
+        model = _option(args, "-m", "--model")
+        port = _option(args, "--port")
+        label = Path(model).name if model else executable
+        return f"{label}:{port}" if port else label
+    if executable.startswith("python"):
+        if "-m" in args and args.index("-m") + 1 < len(args):
+            return args[args.index("-m") + 1]
+        script = next((arg for arg in args[1:] if arg.endswith(".py")), executable)
+        return Path(script).name
+    return executable
+
+
+def _option(args: list[str], *names: str) -> str | None:
+    for index, arg in enumerate(args):
+        if arg in names and index + 1 < len(args):
+            return args[index + 1]
+        for name in names:
+            if arg.startswith(name + "="):
+                return arg.split("=", 1)[1]
+    return None
 
 
 def _percentile(values: list[float], p: float) -> float:

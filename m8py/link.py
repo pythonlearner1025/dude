@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 KIND_JSON, KIND_AUDIO, KIND_HEAR, KIND_VIEW = 1, 2, 3, 4
 
 
@@ -23,7 +25,7 @@ class GameLink:
         self,
         hello: dict[str, Any],
         events: asyncio.Queue[dict[str, Any]],
-        hearing: asyncio.Queue[tuple[dict[str, Any], list[float], float]],
+        hearing: asyncio.Queue[tuple[dict[str, Any], np.ndarray, float]],
     ) -> None:
         self.hello, self.events, self.hearing = hello, events, hearing
         self.state: dict[str, Any] | None = None
@@ -49,6 +51,8 @@ class GameLink:
         writer.transport.set_write_buffer_limits(high=256 * 1024)
         old = self.writer
         self.writer = writer
+        peer = writer.get_extra_info("peername")
+        print(f"[game] connected {peer}", flush=True)
         if old and old is not writer:
             old.close()
         await self.send_json(self.hello)
@@ -64,6 +68,7 @@ class GameLink:
             if self.writer is writer:
                 self.writer = None
             writer.close()
+            print(f"[game] disconnected {peer}", flush=True)
 
     async def handle_frame(self, kind: int, payload: bytes) -> None:
         received_at = time.monotonic()
@@ -75,9 +80,10 @@ class GameLink:
                 return
             body = payload[2 + length :]
             if kind == KIND_HEAR:
-                samples = [
-                    x[0] / 32768 for x in struct.iter_unpack("<h", body[: len(body) // 2 * 2])
-                ]
+                samples = (
+                    np.frombuffer(body[: len(body) // 2 * 2], dtype="<i2").astype(np.float32)
+                    / 32768
+                )
                 await self.hearing.put((about, samples, received_at))
                 return
             width, height = int(about.get("width", 0)), int(about.get("height", 0))
