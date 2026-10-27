@@ -78,6 +78,7 @@ class FakeGame:
         self._last_say = ""
         self._offered: dict[str, set[str] | None] = {}
         self._violations: list[str] = []
+        self._dead_targets: set[str] = set()
         self._audio_after_stop = False
         self._awaiting_audio_end = False
         self.state = dict(self.scenario.get("initial_state", {}))
@@ -219,8 +220,11 @@ class FakeGame:
             target = self._option_label(name, option).split()[0] or "enemy"
             if "shooting at" not in text:
                 text = text.replace(". {player}:", f", shooting at the {target}. {{player}}:")
-            delay = float(self.scenario.get("action_consequence_delay", 1.5)) / self.speed
-            asyncio.create_task(self._kill_after(delay, target))
+            key = option or target
+            if key not in self._dead_targets:
+                self._dead_targets.add(key)
+                delay = float(self.scenario.get("action_consequence_delay", 1.5)) / self.speed
+                asyncio.create_task(self._kill_after(delay, target, option))
         self.state["state"] = text
         await self.log("consequence", action=name, option=option, state=text)
 
@@ -232,9 +236,31 @@ class FakeGame:
                     return str((candidate.get("options") or {}).get(option, ""))
         return ""
 
-    async def _kill_after(self, delay: float, target: str) -> None:
+    async def _kill_after(self, delay: float, target: str, option: str) -> None:
         await asyncio.sleep(delay)
         if target and target in str(self.state.get("state", "")):
+            actions = []
+            targeted = {"shoot", "rush", "frag_grenade", "plasma_grenade", "melee"}
+            for action in self.state.get("actions", []):
+                options = action.get("options")
+                if isinstance(options, dict):
+                    options.pop(option, None)
+                if action.get("name") not in targeted or options:
+                    actions.append(action)
+            self.state["actions"] = actions
+            text = str(self.state.get("state", ""))
+            text = text.replace(f", shooting at the {target}", "")
+            if "Enemies: " in text:
+                before, enemies = text.split("Enemies: ", 1)
+                remaining = [
+                    enemy.strip().rstrip(".")
+                    for enemy in enemies.split(";")
+                    if not enemy.strip().startswith(target)
+                ]
+                text = before + "Enemies: " + ("; ".join(remaining) if remaining else "none") + "."
+                self.state["in_combat"] = bool(remaining)
+            self.state["state"] = text
+            await self._send_state()
             await self.send_json({"type": "event", "text": f"Kevin killed a {target}."})
 
     async def _states(self) -> None:

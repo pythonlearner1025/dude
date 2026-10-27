@@ -51,7 +51,7 @@
       ]
     }},
     {"at": 13.1, "kind": "event", "text": "Enemies came into view: two grunts ahead."},
-    {"at": 22, "kind": "event", "text": "Kevin killed a grunt.", "react": false},
+    {"at": 22, "kind": "event", "text": "{player} killed a grunt.", "react": false},
     {"at": 27, "kind": "player_wav", "file": "fixtures/grab-shotgun.wav"},
     {"at": 36, "kind": "state", "update": {
       "in_combat": false,
