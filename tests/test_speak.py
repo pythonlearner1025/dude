@@ -1,8 +1,9 @@
 import asyncio
 
+import httpx
 import pytest
 
-from m8py.speak import EndJob, SentenceJob, run
+from m8py.speak import BreezeBackend, EndJob, SentenceJob, run
 from m8py.speaking import Speaking
 from m8py.trace import Trace
 
@@ -28,6 +29,24 @@ class Link:
 
     async def send_json(self, x):
         self.json.append(x)
+
+
+class OddChunks(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        for chunk in (b"\x01", b"\x02\x03\x04", b"\x05", b"\x06\x07\x08"):
+            yield chunk
+
+
+@pytest.mark.asyncio
+async def test_breeze_stream_preserves_samples_split_across_chunks():
+    async def handler(request):
+        return httpx.Response(200, stream=OddChunks())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        backend = BreezeBackend("http://tts", b"wav", "reference", 42, 24000, client)
+        output = b"".join([chunk async for chunk in backend.stream("hello", "")])
+
+    assert output == b"\x01\x02\x03\x04\x05\x06\x07\x08"
 
 
 @pytest.mark.asyncio

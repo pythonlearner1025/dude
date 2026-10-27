@@ -86,9 +86,14 @@ class BreezeBackend:
             if attempt < 20:
                 await asyncio.sleep(0.1)
         response.raise_for_status()
+        held = b""
         async for chunk in response.aiter_bytes():
             if chunk:
-                yield chunk[: len(chunk) // 2 * 2]
+                chunk = held + chunk
+                whole = len(chunk) // 2 * 2
+                if whole:
+                    yield chunk[:whole]
+                held = chunk[whole:]
         await response.aclose()
 
 
