@@ -120,6 +120,10 @@ class Listener:
         self._vad = self._create_vad()
 
     def _create_vad(self):
+        if self.cfg.mic.vad == "energy":
+            return None
+        if self.cfg.mic.vad != "silero":
+            raise ValueError(f"unknown VAD: {self.cfg.mic.vad}")
         try:
             import sherpa_onnx
 
@@ -132,8 +136,9 @@ class Listener:
             c.silero_vad.window_size = VAD_WINDOW
             c.sample_rate = SAMPLE_RATE
             return sherpa_onnx.VoiceActivityDetector(c, 60)
-        except Exception:
-            return None
+        except Exception as exc:
+            path = self.cfg.models.silero_vad
+            raise RuntimeError(f"failed to load Silero VAD model {path}: {exc}") from exc
 
     async def feed_pcm(self, pcm: bytes, muted: bool = False) -> None:
         samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype="<i2").astype(np.float32) / 32768

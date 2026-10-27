@@ -1,9 +1,11 @@
 import asyncio
+import builtins
 
 import numpy as np
 import pytest
 from aiohttp import ClientSession, web
 
+from m8py.listen import Listener as RealListener
 from m8py.listen import remote_mic_app
 from m8py.speaking import Speaking
 
@@ -33,6 +35,27 @@ class Link:
 
     async def send_json(self, value):
         self.sent.append(value)
+
+
+def test_silero_load_failure_names_model(cfg, monkeypatch):
+    cfg.mic.vad = "silero"
+    real_import = builtins.__import__
+
+    def fail_sherpa(name, *args, **kwargs):
+        if name == "sherpa_onnx":
+            raise OSError("cannot load model")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_sherpa)
+
+    with pytest.raises(RuntimeError, match=str(cfg.models.silero_vad)):
+        RealListener(cfg, object(), 16000, object())
+
+
+def test_energy_vad_is_explicit_fallback(cfg):
+    cfg.mic.vad = "energy"
+    listener = RealListener(cfg, object(), 16000, object())
+    assert listener._vad is None
 
 
 @pytest.mark.asyncio

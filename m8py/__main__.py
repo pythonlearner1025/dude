@@ -79,6 +79,7 @@ async def run(cfg: Config) -> Path:
         lambda text, timing, turn_id: inputs.put(Heard(text, timing, turn_id)),
         trace,
     )
+    print(f"[mic] VAD: {cfg.mic.vad}", flush=True)
     remote_runner = None
     tasks = [
         asyncio.create_task(brain.run()),

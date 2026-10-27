@@ -7,6 +7,7 @@ voice_seed = 42
 
 [mic]
 source = "none"
+vad = "energy"
 barge_in = true
 mute_while_speaking = true
 save_recordings = false

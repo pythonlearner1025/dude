@@ -16,6 +16,7 @@ class MateConfig:
 
 @dataclass(slots=True)
 class MicConfig:
+    vad: str = "silero"
     mute_while_speaking: bool = True
     barge_in: bool = True
     save_recordings: bool = False
