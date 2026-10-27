@@ -267,7 +267,9 @@ class Brain:
             cooldown = not to_player and (
                 q is None or time.monotonic() < q + self.link.speech_cooldown
             )
+            span.mark("kev_start")
             speak = await self.decide(to_player, cooldown, span)
+            span.mark("kev_done")
             span.set(spoke=speak)
             if speak:
                 if self.speaking.is_speaking():

@@ -223,8 +223,33 @@ def generate_report(session_dir: str | Path) -> Path:
     actions = Counter(str(s.get("action")) for s in spans if s.get("action"))
     errors = Counter(str(s.get("error_stage", "unknown")) for s in spans if s.get("error"))
     spoke = [bool(s.get("spoke")) for s in spans if "spoke" in s]
+    key_metrics = {
+        "mouth_to_ear_ms": _values(spans, "mouth_to_ear_ms"),
+        "event_to_ear_ms": _values(spans, "event_to_ear_ms"),
+        "queue_wait_ms": _values(spans, "queue_wait_ms"),
+        "stt": _differences(spans, "stt_done", "vad_speech_end"),
+        "kev total": _differences(spans, "kev_done", "kev_start"),
+        "llm_first_token - llm_request": _differences(spans, "llm_first_token", "llm_request"),
+        "first_sentence - llm_request": _differences(spans, "first_sentence", "llm_request"),
+        "tts_first_audio - tts_request": _differences(spans, "tts_first_audio", "tts_request"),
+    }
     lines = [
         f"# m8py session {session_dir.name}",
+        "",
+        "## Key metrics",
+        "",
+        "| Metric | p50 ms | p90 ms | max ms | n |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for key, values in key_metrics.items():
+        if values:
+            lines.append(
+                f"| {key} | {_percentile(values, 0.5):.1f} | "
+                f"{_percentile(values, 0.9):.1f} | {max(values):.1f} | {len(values)} |"
+            )
+        else:
+            lines.append(f"| {key} | - | - | - | 0 |")
+    lines += [
         "",
         f"Turns: {len(spans)}",
         "",
@@ -252,3 +277,22 @@ def generate_report(session_dir: str | Path) -> Path:
     report = session_dir / "summary.md"
     report.write_text("\n".join(lines))
     return report
+
+
+def _values(spans: list[dict[str, Any]], key: str) -> list[float]:
+    return [
+        float(span[key])
+        for span in spans
+        if isinstance(span.get(key), (int, float)) and not isinstance(span.get(key), bool)
+    ]
+
+
+def _differences(spans: list[dict[str, Any]], end: str, start: str) -> list[float]:
+    return [
+        float(span[end]) - float(span[start])
+        for span in spans
+        if isinstance(span.get(end), (int, float))
+        and not isinstance(span.get(end), bool)
+        and isinstance(span.get(start), (int, float))
+        and not isinstance(span.get(start), bool)
+    ]

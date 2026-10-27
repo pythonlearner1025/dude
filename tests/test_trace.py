@@ -60,6 +60,10 @@ async def test_absolute_input_clock_includes_queue_wait_in_latency(tmp_path):
     assert heard.data["queue_wait_ms"] == pytest.approx(200, abs=5)
     assert heard.data["mouth_to_ear_ms"] == pytest.approx(350, abs=5)
     assert event.data["event_to_ear_ms"] == pytest.approx(525, abs=5)
+    report = (t.session_dir / "summary.md").read_text()
+    assert report.index("## Key metrics") < report.index("## Latencies")
+    assert "| mouth_to_ear_ms |" in report
+    assert "| queue_wait_ms |" in report
 
 
 def test_gpu_process_labels_distinguish_models_and_python(tmp_path):
