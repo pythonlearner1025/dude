@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,7 +23,7 @@ class GameLink:
         self,
         hello: dict[str, Any],
         events: asyncio.Queue[dict[str, Any]],
-        hearing: asyncio.Queue[tuple[dict[str, Any], list[float]]],
+        hearing: asyncio.Queue[tuple[dict[str, Any], list[float], float]],
     ) -> None:
         self.hello, self.events, self.hearing = hello, events, hearing
         self.state: dict[str, Any] | None = None
@@ -65,6 +66,7 @@ class GameLink:
             writer.close()
 
     async def handle_frame(self, kind: int, payload: bytes) -> None:
+        received_at = time.monotonic()
         if kind in (KIND_HEAR, KIND_VIEW) and len(payload) >= 2:
             length = struct.unpack(">H", payload[:2])[0]
             try:
@@ -76,7 +78,7 @@ class GameLink:
                 samples = [
                     x[0] / 32768 for x in struct.iter_unpack("<h", body[: len(body) // 2 * 2])
                 ]
-                await self.hearing.put((about, samples))
+                await self.hearing.put((about, samples, received_at))
                 return
             width, height = int(about.get("width", 0)), int(about.get("height", 0))
             if (
@@ -103,6 +105,7 @@ class GameLink:
             case "mic":
                 self.mic_muted = bool(msg.get("muted", False))
             case "event" | "saved" | "loaded" | "direct":
+                msg["_received_at"] = received_at
                 await self.events.put(msg)
 
     async def send_frame(self, kind: int, payload: bytes) -> None:

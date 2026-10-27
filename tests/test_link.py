@@ -21,8 +21,9 @@ async def test_handle_all_incoming_kinds():
     await link.handle_frame(
         KIND_HEAR, struct.pack(">H", len(about)) + about + struct.pack("<hh", -32768, 16384)
     )
-    _, samples = await hearing.get()
+    _, samples, received_at = await hearing.get()
     assert samples == [-1, 0.5]
+    assert received_at > 0
     link._view_future = asyncio.get_running_loop().create_future()
     meta = json.dumps({"width": 1, "height": 1, "spots": []}).encode()
     await link.handle_frame(KIND_VIEW, struct.pack(">H", len(meta)) + meta + b"\x01\x02\x03")

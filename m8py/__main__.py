@@ -95,26 +95,41 @@ async def run(cfg: Config) -> Path:
             elif kind == "loaded":
                 item = Loaded(str(msg.get("id", "")))
             elif kind == "direct":
-                item = Event(f"Game master: {msg.get('text', '')}", True)
+                item = Event(
+                    f"Game master: {msg.get('text', '')}",
+                    True,
+                    {"event_received_at": msg.get("_received_at", time.monotonic())},
+                )
             else:
-                item = Event(str(msg.get("text", "")), bool(msg.get("react", True)))
+                item = Event(
+                    str(msg.get("text", "")),
+                    bool(msg.get("react", True)),
+                    {"event_received_at": msg.get("_received_at", time.monotonic())},
+                )
             await inputs.put(item)
 
     async def forward_hearing():
         while True:
-            about, samples = await hearing.get()
+            about, samples, received_at = await hearing.get()
             started = time.monotonic()
             rate = int(about.get("sample_rate", 16000))
             audio = resample(np.asarray(samples, np.float32), rate)
             text = await transcriber.transcribe(audio)
+            stt_done_at = time.monotonic()
             if not text:
                 continue
             await asyncio.sleep(max(0, len(samples) / rate - (time.monotonic() - started)))
+            playback_wait_done_at = time.monotonic()
             radio = " over the radio" if about.get("radio") else ""
             await inputs.put(
                 Event(
                     f'{about.get("speaker", "Someone")}{radio}: "{text}"',
                     bool(about.get("react", True)),
+                    {
+                        "event_received_at": received_at,
+                        "stt_done_at": stt_done_at,
+                        "playback_wait_done_at": playback_wait_done_at,
+                    },
                 )
             )
 

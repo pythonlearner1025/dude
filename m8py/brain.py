@@ -32,6 +32,7 @@ class Heard:
 class Event:
     text: str
     react: bool = True
+    timing: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -248,7 +249,7 @@ class Brain:
         await self.respond(True, span)
 
     async def on_events(self, events: list[Event], quiet: bool = False) -> None:
-        span = self.trace.new_span("quiet" if quiet else "event")
+        span = self.trace.new_span("quiet" if quiet else "event", **events[0].timing)
         for event in events:
             text = self.fill(event.text)
             self.memory.feed.append(text)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from aiohttp import web
@@ -71,12 +72,13 @@ def create_app(
         return web.Response(text=target.get())
 
     async def send(request: web.Request) -> web.Response:
+        received_at = time.monotonic()
         body = await request.text()
         kind = request.match_info["kind"]
         await inputs.put(
             {
-                "say": Heard(body),
-                "event": Event(body, True),
+                "say": Heard(body, {"stt_done_at": received_at}),
+                "event": Event(body, True, {"event_received_at": received_at}),
                 "save": Saved(body),
                 "load": Loaded(body),
             }[kind]

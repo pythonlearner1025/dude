@@ -72,7 +72,18 @@ class Trace:
 class Span:
     def __init__(self, trace: Trace, turn_id: str, trigger: str, initial: dict[str, Any]) -> None:
         self.trace, self.started = trace, time.monotonic()
-        self.data: dict[str, Any] = {"turn_id": turn_id, "trigger": trigger, **initial}
+        converted = {
+            key.removesuffix("_at"): round((value - self.started) * 1000, 3)
+            if key.endswith("_at") and isinstance(value, (int, float))
+            else value
+            for key, value in initial.items()
+        }
+        self.data: dict[str, Any] = {"turn_id": turn_id, "trigger": trigger, **converted}
+        queued_at = converted.get("stt_done") if trigger == "heard" else None
+        if queued_at is None and trigger in {"event", "quiet"}:
+            queued_at = converted.get("playback_wait_done", converted.get("event_received"))
+        if isinstance(queued_at, (int, float)):
+            self.data["queue_wait_ms"] = -queued_at
         self._finished = False
 
     def mark(self, stage: str) -> None:
@@ -98,7 +109,9 @@ class Span:
                 self.data["first_audio_sent"] - self.data["vad_speech_end"]
             )
         if self.data.get("trigger") in {"event", "quiet"} and "first_audio_sent" in self.data:
-            self.data["event_to_ear_ms"] = self.data["first_audio_sent"]
+            self.data["event_to_ear_ms"] = self.data["first_audio_sent"] - self.data.get(
+                "event_received", 0
+            )
         self.trace.queue.put_nowait(("spans.jsonl", self.data.copy()))
 
 

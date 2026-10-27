@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
+import time
 from collections import deque
 from typing import Awaitable, Callable
 
@@ -194,16 +195,17 @@ class Listener:
 
     async def _recognize(self, audio: np.ndarray) -> None:
         turn_id = f"{now_ms()}-mic"
-        started = asyncio.get_running_loop().time()
+        vad_speech_end_at = time.monotonic()
+        vad_speech_start_at = vad_speech_end_at - len(audio) / SAMPLE_RATE
         text = await self.transcriber.transcribe(audio)
-        elapsed = (asyncio.get_running_loop().time() - started) * 1000
+        stt_done_at = time.monotonic()
         if self.trace and self.trace.session_dir.joinpath("audio").exists():
             self.trace.session_dir.joinpath("audio", f"{turn_id}-mic.wav").write_bytes(wav(audio))
         if text:
             timing = {
-                "vad_speech_start": -elapsed - len(audio) / SAMPLE_RATE * 1000,
-                "vad_speech_end": -elapsed,
-                "stt_done": 0.0,
+                "vad_speech_start_at": vad_speech_start_at,
+                "vad_speech_end_at": vad_speech_end_at,
+                "stt_done_at": stt_done_at,
             }
             await self.output(text, timing, turn_id)
 
