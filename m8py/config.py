@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-import tomllib
-from typing import Any
 
 
 @dataclass(slots=True)
@@ -85,9 +84,11 @@ class Config:
         path = Path(path).resolve()
         raw = tomllib.loads(path.read_text())
         base = path.parent
+
         def resolved(value: str | Path) -> Path:
             p = Path(value)
             return p if p.is_absolute() else (base / p).resolve()
+
         mate = dict(raw["mate"])
         mate["voice_reference"] = resolved(mate["voice_reference"])
         if mate.get("persona") is not None:
@@ -97,10 +98,15 @@ class Config:
         logging = dict(raw.get("log", {}))
         logging["directory"] = resolved(logging.get("directory", "logs"))
         return cls(
-            mate=MateConfig(**mate), mic=MicConfig(**raw.get("mic", {})),
-            stt=EndpointConfig(**raw["stt"]), kev=EndpointConfig(**raw["kev"]),
-            llm=EndpointConfig(**raw["llm"]), models=ModelsConfig(**models),
-            game=GameConfig(**raw.get("game", {})), site=SiteConfig(**raw.get("site", {})),
-            remote_mic=RemoteMicConfig(**raw.get("remote_mic", {})), log=LogConfig(**logging),
+            mate=MateConfig(**mate),
+            mic=MicConfig(**raw.get("mic", {})),
+            stt=EndpointConfig(**raw["stt"]),
+            kev=EndpointConfig(**raw["kev"]),
+            llm=EndpointConfig(**raw["llm"]),
+            models=ModelsConfig(**models),
+            game=GameConfig(**raw.get("game", {})),
+            site=SiteConfig(**raw.get("site", {})),
+            remote_mic=RemoteMicConfig(**raw.get("remote_mic", {})),
+            log=LogConfig(**logging),
             base_dir=base,
         )
