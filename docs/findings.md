@@ -45,12 +45,49 @@ silence) → STT → Kev `do` (~140 ms) [+ `which` ~120 ms] [+ `then` chain] →
 first audio → game. Kev's serial calls are a large, avoidable slice (no KV reuse across the 2-5
 calls of one turn, all with the same prefix).
 
-## 3. Qualitative notes so far
+## 3. End to end: fake game against the real models
 
-- Qwen3.5-9B uncensored holds the Kevin persona well (crude, cocky, starts lines with a
-  `[voice direction]`), but lines run longer than the persona's "a quick line or two".
+`m8py bench` with the protocol-faithful fake game (`m8py/fakegame.py`, scenarios in
+`scenarios/`) against the fitted stack. Small samples (2 sessions, 29 turns, 9 spoken replies);
+the live Halo sessions will add more.
+
+| Metric | p50 | p90 / max | n |
+| --- | ---: | ---: | ---: |
+| **Player speech end → first mate audio** (mouth-to-ear) | **0.78-0.91 s** | max 0.99 s | 4 |
+| **Game event → first mate audio** | **1.07 s** | | 1 |
+| STT (Parakeet int8, CPU) | 59-71 ms | 67 ms | 4 |
+| Kev, whole decision chain | 276-372 ms | p90 505-899 ms; 2.06 s with a `look` (vision) | 25 |
+| LLM request → first token | 162-166 ms | 288 ms | 9 |
+| LLM request → first complete sentence | 351-419 ms | 488 ms | 9 |
+| TTS request → first audio (Breeze) | 192 ms | 200 ms | 9 |
+| LLM request → line fully written | 3.4-6.4 s | 6.8 s | 9 |
+| Turn start → last audio sent | **13-18 s** | 22.7 s | 9 |
+| Input queue wait | 0 ms | max 1.55 s (an event waiting behind a reply) | 29 |
+
+- Kev's serial calls are ~40% of mouth-to-ear; the LLM's first sentence another ~40%
+  (the `[voice direction]` note is generated before any speakable word).
+- The first token is ~165 ms in a live turn vs ~45 ms in the isolated benchmark: each turn appends
+  new feed lines before "Right now", so the prefix cache only covers the stable part.
+
+## 4. Qualitative notes
+
+- **Lines are far too long.** Replies were 79-159 words (mean ~115, 13-18 s of speech) against a
+  persona that asks for "a quick line or two" and a combat prompt that asks for "a few words at a
+  time". Length *grew* within a session (79 → 159 words): the model imitates its own previous
+  long turns in the feed. The first live Halo line was ~80 words in 7 sentences.
+- **Repetition:** 4 of 6 combat replies opened "[gritting teeth…] Fuck!"; melodrama escalates
+  ("bleeding out like a stuck pig").
+- **Ungrounded details:** invented injuries ("a plasma round to the shoulder") not in the state.
+- **Directions vs actions:** m8 treats every `[...]` as a voice direction for the TTS, but the
+  model also writes stage actions in brackets ("[shoves a fresh mag into the assault rifle]"),
+  which reach Breeze as speaking instructions.
+- Qwen3.5-9B uncensored otherwise holds Kevin's voice (crude, cocky, in-universe).
 - Kev on the 11-action prompt chose `shoot` with confidence 0.10 (probabilities spread across
-  options); `speak` came out 0.54 — near the 0.5 threshold. Decisions near-uniform across many
-  actions are worth tracking per turn (the trace keeps Kev's full probability vectors).
+  options); `speak` came out 0.54 — near the 0.5 threshold. Kev's calibration was fit on
+  documents/QA (model card), not game states.
+- Speak rate in the fake-game runs: 9 of 29 turns spoke (31%); actions mostly `nothing`/`follow`.
 - Vision on a full 1080p frame costs ~2 s; downscaling the view before sending is an obvious
   latency win (to test).
+- An A/B worth running: m8's original Gemma4-12B with Kev Q4_K_M (≈ −1.4 GB) fits the same
+  budget as Qwen-9B + Kev Q8 and may follow the brevity instructions better.
+

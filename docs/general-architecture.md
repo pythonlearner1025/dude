@@ -43,8 +43,9 @@ See `docs/findings.md` for the tables. Headlines:
 - **Latency (isolated):** Kev 120-140 ms per decision call, and a turn makes 1-5 *serial* calls
   that each re-read the whole ~800-token prompt; LLM first token ~45 ms cached; vision on a 1080p
   frame ~2 s.
-- **End-to-end (fake game, real models):** being measured now with `m8py bench`; results
-  (mouth-to-ear, event-to-ear, queue wait, per-stage breakdown) will land in `docs/findings.md`.
+- **End-to-end (fake game, real models):** player speech end → first mate audio 0.8-0.9 s,
+  game event → first audio ~1.1 s; Kev's chain and the LLM's first sentence are ~40% each. But a
+  reply then runs 13-18 s of speech: the latency problem is solved before the *length* problem.
 - **Decision quality signal:** Kev's calibration was fit on documents/QA, not game states; on an
   11-way game choice its top option had confidence 0.10 and `speak` hovered at 0.54. A
   general-purpose decision model is a format, not a policy: each game needs its own labels.
