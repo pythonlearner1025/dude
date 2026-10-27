@@ -1,0 +1,23 @@
+{
+  "name": "quiet",
+  "duration": 65,
+  "state_rate_hz": 2,
+  "speech_cooldown": 1,
+  "settle": 4,
+  "initial_state": {
+    "level": "a10",
+    "in_combat": false,
+    "on_radio": false,
+    "state": "Kevin: unhurt, shields full, holding an assault rifle (60 rounds loaded, spare ammo), a pistol on his back (12 rounds loaded, spare ammo), 2 frag and 0 plasma grenades, following {player}. {player}: close by ahead, unhurt, shields full. Enemies: none.",
+    "actions": [
+      {"name": "stay", "description": "stays where he is"},
+      {"name": "search_weapons", "description": "looks around for weapons", "result": "none nearby"},
+      {"name": "look", "description": "takes a look at something {player} wants him to see", "view": "describe"}
+    ]
+  },
+  "timeline": [
+    {"at": 1, "kind": "player_text", "text": "Remember that the blue tunnel is our way back."},
+    {"at": 7, "kind": "saved", "id": "a10:900"},
+    {"at": 61, "kind": "loaded", "id": "a10:900"}
+  ]
+}

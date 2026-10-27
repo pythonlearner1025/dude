@@ -219,6 +219,12 @@ def parser() -> argparse.ArgumentParser:
     design.add_argument("--out", required=True, type=Path)
     design.add_argument("--url", default="http://127.0.0.1:7860")
     design.add_argument("--seed", type=int, default=42)
+    bench = sub.add_parser("bench")
+    bench.add_argument("--scenario", required=True, type=Path)
+    bench.add_argument("--config", required=True, type=Path)
+    bench.add_argument("--mocks", action="store_true")
+    bench.add_argument("--running", action="store_true")
+    bench.add_argument("--speed", type=float, default=1.0)
     return p
 
 
@@ -230,6 +236,22 @@ def main() -> None:
         return
     if command == "voice-design":
         asyncio.run(voice_design(args.url, args.description, args.text, args.out, args.seed))
+        return
+    if command == "bench":
+        from .bench import print_result, run_benchmark
+
+        session, result = asyncio.run(
+            run_benchmark(
+                args.scenario,
+                args.config,
+                mocks=args.mocks,
+                running=args.running,
+                speed=args.speed,
+            )
+        )
+        print_result(session, result)
+        if not result["passed"]:
+            raise SystemExit(1)
         return
     cfg = Config.load(getattr(args, "config", "m8.toml"))
     if args.transcribe or args.simulate_mic:

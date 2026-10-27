@@ -6,13 +6,17 @@ voice_reference = "../voices/mock.wav"
 voice_seed = 42
 
 [mic]
-source = "none"
+source = "remote"
 vad = "energy"
 barge_in = true
 mute_while_speaking = true
 save_recordings = false
 vad_threshold = 0.5
 end_of_speech_silence = 0.1
+
+[remote_mic]
+bind = "127.0.0.1"
+port = 8091
 
 [stt]
 url = "http://127.0.0.1:8083/v1/audio/transcriptions"
