@@ -159,13 +159,15 @@ async def test_look_records_vision_failures_and_returns_fallback(cfg, tmp_path, 
         ),
     )
 
-    what, picture = await b.look("choose", {"type": "action"}, trace.new_span("event"))
+    span = trace.new_span("event")
+    what, picture = await b.look("choose", {"type": "action"}, span)
 
     sight = trace.entries[-1]
     assert what == "he can't see it"
     assert picture and sight["kind"] == "sight"
     assert sight["data"]["picture"] == picture
     assert sight["data"]["error"]
+    assert span.data["error_stage"] == "vision"
     await client.aclose()
     await trace.close()
 
@@ -187,6 +189,24 @@ async def test_say_failure_before_stream_does_not_add_feed_or_open_line(cfg, tmp
     assert b.speaking.lines == 0
     assert b.speech.empty()
     assert trace.entries[-1]["data"]["error"]
+    assert trace._spans[next(iter(trace._spans))].data["error_stage"] == "llm"
+    await client.aclose()
+    await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_respond_finishes_span_when_kev_fails(cfg, tmp_path):
+    def handler(request):
+        return httpx.Response(503)
+
+    b, _, trace, client = make(cfg, tmp_path, handler)
+    span = trace.new_span("heard")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await b.respond(True, span)
+
+    assert span.data["error_stage"] == "kev"
+    assert span._finished
     await client.aclose()
     await trace.close()
 

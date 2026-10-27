@@ -260,16 +260,21 @@ class Brain:
             span.finish()
 
     async def respond(self, to_player: bool, span: Span) -> None:
-        q = self.speaking.quiet_from()
-        cooldown = not to_player and (q is None or time.monotonic() < q + self.link.speech_cooldown)
-        speak = await self.decide(to_player, cooldown, span)
-        span.set(spoke=speak)
-        if speak:
-            if self.speaking.is_speaking():
-                self.speaking.interrupt()
-            await self.say(span)
-        else:
-            span.finish()
+        speech_finishes = False
+        try:
+            q = self.speaking.quiet_from()
+            cooldown = not to_player and (
+                q is None or time.monotonic() < q + self.link.speech_cooldown
+            )
+            speak = await self.decide(to_player, cooldown, span)
+            span.set(spoke=speak)
+            if speak:
+                if self.speaking.is_speaking():
+                    self.speaking.interrupt()
+                speech_finishes = await self.say(span)
+        finally:
+            if not speech_finishes:
+                span.finish()
 
     async def kev(
         self,
@@ -281,9 +286,13 @@ class Brain:
     ) -> dict[str, Any]:
         request = {"model": "kev-latest", "state": prompt, "questions": questions}
         started = time.monotonic()
-        response = await self.client.post(self.cfg.kev.url, json=request)
-        response.raise_for_status()
-        body = response.json()
+        try:
+            response = await self.client.post(self.cfg.kev.url, json=request)
+            response.raise_for_status()
+            body = response.json()
+        except Exception as exc:
+            span.set_error("kev", exc)
+            raise
         calls.append(
             {
                 "purpose": purpose,
@@ -494,6 +503,7 @@ class Brain:
             else:
                 what = clean(output)
         except Exception as exc:
+            span.set_error("vision", exc)
             self.trace.add(
                 "sight",
                 {
@@ -520,7 +530,7 @@ class Brain:
         )
         return what, filename
 
-    async def say(self, span: Span) -> None:
+    async def say(self, span: Span) -> bool:
         name = self.cfg.mate.name
         messages = self.messages()
         request = {"messages": messages, "temperature": self.cfg.llm.temperature, "stream": True}
@@ -575,6 +585,7 @@ class Brain:
                             directions.append(how)
         except Exception as exc:
             error = str(exc)
+            span.set_error("llm", exc)
         if streaming_started:
             if rest := splitter.finish():
                 await self._sentence(rest, how, generation, span)
@@ -598,6 +609,7 @@ class Brain:
                 "error": error,
             },
         )
+        return streaming_started
 
     async def _sentence(self, text: str, how: str, generation: int, span: Span) -> None:
         text = text.strip()

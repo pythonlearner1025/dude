@@ -73,6 +73,7 @@ class Span:
     def __init__(self, trace: Trace, turn_id: str, trigger: str, initial: dict[str, Any]) -> None:
         self.trace, self.started = trace, time.monotonic()
         self.data: dict[str, Any] = {"turn_id": turn_id, "trigger": trigger, **initial}
+        self._finished = False
 
     def mark(self, stage: str) -> None:
         self.data[stage] = round((time.monotonic() - self.started) * 1000, 3)
@@ -80,7 +81,14 @@ class Span:
     def set(self, **values: Any) -> None:
         self.data.update(values)
 
+    def set_error(self, stage: str, error: BaseException | str) -> None:
+        self.data.setdefault("error", str(error))
+        self.data.setdefault("error_stage", stage)
+
     def finish(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
         if (
             self.data.get("trigger") == "heard"
             and "first_audio_sent" in self.data
@@ -159,6 +167,7 @@ def generate_report(session_dir: str | Path) -> Path:
             ):
                 numeric.setdefault(key, []).append(float(value))
     actions = Counter(str(s.get("action")) for s in spans if s.get("action"))
+    errors = Counter(str(s.get("error_stage", "unknown")) for s in spans if s.get("error"))
     spoke = [bool(s.get("spoke")) for s in spans if "spoke" in s]
     lines = [
         f"# m8py session {session_dir.name}",
@@ -183,6 +192,7 @@ def generate_report(session_dir: str | Path) -> Path:
         f"Spoke: {sum(spoke)}/{len(spoke)} ({spoke_percent:.1f}%)",
         f"Cut-offs: {sum(bool(s.get('cut_off')) for s in spans)}",
         f"Errors: {sum(bool(s.get('error')) for s in spans)}",
+        f"Errors by stage: {dict(errors)}",
         "",
     ]
     report = session_dir / "summary.md"

@@ -166,6 +166,8 @@ async def run(
                         job.span.mark("last_audio_sent")
         except Exception as exc:
             error = str(exc)
+            if job.span:
+                job.span.set_error("tts", exc)
         trace.add(
             "voice",
             {

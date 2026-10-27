@@ -29,6 +29,15 @@ class ClosingBackend:
             self.closed.set()
 
 
+class ErrorBackend:
+    sample_rate = 24000
+
+    async def stream(self, text, how):
+        if False:
+            yield b""
+        raise RuntimeError("tts offline")
+
+
 class Link:
     def __init__(self):
         self.said = []
@@ -108,3 +117,28 @@ async def test_interrupt_closes_active_tts_stream(tmp_path):
     await trace.close()
 
     assert len(link.audio) == 1
+
+
+@pytest.mark.asyncio
+async def test_tts_error_is_recorded_on_span_and_end_finishes_once(tmp_path):
+    speaking = Speaking()
+    speaking.begin_line()
+    trace = Trace(tmp_path / "logs")
+    trace.start()
+    span = trace.new_span("heard")
+    jobs = asyncio.Queue()
+    task = asyncio.create_task(run(ErrorBackend(), Link(), speaking, trace, jobs))
+    await jobs.put(SentenceJob("hello", "", speaking.generation, span))
+    await jobs.put(EndJob(speaking.generation, span))
+
+    for _ in range(20):
+        if span._finished:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await trace.close()
+
+    assert span.data["error_stage"] == "tts"
+    records = (trace.session_dir / "spans.jsonl").read_text().splitlines()
+    assert len(records) == 1
