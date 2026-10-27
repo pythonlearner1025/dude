@@ -472,25 +472,38 @@ class Brain:
             }
         traced = json.loads(json.dumps(request))
         traced["messages"][1]["content"][1]["image_url"]["url"] = f"/view?name={filename}"
-        response = await self.client.post(self.cfg.llm.url, json=request)
-        response.raise_for_status()
-        body = response.json()
-        output = str(body.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
-        if choose:
-            try:
+        try:
+            response = await self.client.post(self.cfg.llm.url, json=request)
+            response.raise_for_status()
+            body = response.json()
+            output = str(body.get("choices", [{}])[0].get("message", {}).get("content", "")).strip()
+            if choose:
                 answer = json.loads(output)
-            except ValueError:
-                answer = {}
-            spot = int(answer.get("spot", 0))
-            found = next((s for s in view.spots if spot > 0 and s.get("id") == spot), None)
-            if found:
-                msg["option"] = str(spot)
-                await self.link.send_json(msg)
-                what = f"{str(answer.get('place', 'there')).strip()} ({found.get('metres')} m off)"
+                spot = answer.get("spot", 0)
+                if not isinstance(spot, int) or isinstance(spot, bool):
+                    raise ValueError("vision response spot is not an integer")
+                found = next((s for s in view.spots if spot > 0 and s.get("id") == spot), None)
+                if found:
+                    msg["option"] = str(spot)
+                    await self.link.send_json(msg)
+                    what = (
+                        f"{str(answer.get('place', 'there')).strip()} ({found.get('metres')} m off)"
+                    )
+                else:
+                    what = "none that fits"
             else:
-                what = "none that fits"
-        else:
-            what = clean(output)
+                what = clean(output)
+        except Exception as exc:
+            self.trace.add(
+                "sight",
+                {
+                    "kind": kind,
+                    "request": traced,
+                    "picture": filename,
+                    "error": str(exc),
+                },
+            )
+            return "he can't see it", filename
         span.mark("look_done")
         self.trace.add(
             "sight",

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -131,6 +132,39 @@ async def test_cooldown_skips_speak(cfg, tmp_path):
     b, _, trace, client = make(cfg, tmp_path, handler)
     assert await b.decide(False, True, trace.new_span("event")) is False
     assert len(calls) == 1
+    await client.aclose()
+    await trace.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["transport", "json", "spot"])
+async def test_look_records_vision_failures_and_returns_fallback(cfg, tmp_path, failure):
+    def handler(request):
+        if failure == "transport":
+            raise httpx.ConnectError("vision unavailable", request=request)
+        if failure == "json":
+            return httpx.Response(200, content=b"not json")
+        content = json.dumps({"place": "door", "spot": "one"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    b, link, trace, client = make(cfg, tmp_path, handler)
+    link.view = lambda timeout=2: asyncio.sleep(
+        0,
+        result=SimpleNamespace(
+            rgb=bytearray(b"\x00\x00\x00"),
+            width=1,
+            height=1,
+            spots=[{"id": 1, "x": 0.5, "y": 0.5, "metres": 2}],
+        ),
+    )
+
+    what, picture = await b.look("choose", {"type": "action"}, trace.new_span("event"))
+
+    sight = trace.entries[-1]
+    assert what == "he can't see it"
+    assert picture and sight["kind"] == "sight"
+    assert sight["data"]["picture"] == picture
+    assert sight["data"]["error"]
     await client.aclose()
     await trace.close()
 
