@@ -1,0 +1,44 @@
+[mate]
+name = "Kevin"
+persona = "../personas/kevin"
+voice_server = "http://127.0.0.1:7860"
+voice_reference = "../voices/soldier.wav"
+voice_seed = 42
+
+[mic]
+source = "remote"
+barge_in = true
+mute_while_speaking = true
+save_recordings = false
+vad_threshold = 0.5
+end_of_speech_silence = 0.1
+
+[remote_mic]
+bind = "0.0.0.0"
+port = 8091
+
+[stt]
+url = "http://127.0.0.1:8083/v1/audio/transcriptions"
+
+[kev]
+url = "http://127.0.0.1:8080/v1/systemone"
+
+[llm]
+url = "http://127.0.0.1:8081/v1/chat/completions"
+temperature = 0.7
+
+[models]
+silero_vad = "../models/silero_vad.onnx"
+
+[game]
+bind = "127.0.0.1"
+port = 47800
+
+[site]
+bind = "127.0.0.1"
+port = 8090
+
+[log]
+directory = "../logs"
+save_audio = false
+gpu_interval = 2.0
