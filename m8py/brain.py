@@ -528,7 +528,6 @@ class Brain:
         started = time.monotonic()
         span.mark("llm_request")
         span.set(prompt_tokens_llm=len(json.dumps(messages, ensure_ascii=False)) // 4)
-        self.speaking.begin_line()
         full = ""
         notes = Notes()
         splitter = SentenceSplitter()
@@ -537,9 +536,12 @@ class Brain:
         first = None
         error = None
         model = None
+        streaming_started = False
         try:
             async with self.client.stream("POST", self.cfg.llm.url, json=request) as response:
                 response.raise_for_status()
+                self.speaking.begin_line()
+                streaming_started = True
                 async for line in response.aiter_lines():
                     if self.speaking.generation != generation:
                         break
@@ -550,12 +552,13 @@ class Brain:
                         break
                     chunk = json.loads(data)
                     model = model or chunk.get("model")
-                    delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
+                    if chunk.get("timings"):
+                        span.set(llm_timings=chunk["timings"])
+                    if chunk.get("usage"):
+                        span.set(llm_usage=chunk["usage"])
+                    choices = chunk.get("choices") or []
+                    delta = choices[0].get("delta", {}).get("content") if choices else None
                     if delta is None:
-                        if chunk.get("timings"):
-                            span.set(llm_timings=chunk["timings"])
-                        if chunk.get("usage"):
-                            span.set(llm_usage=chunk["usage"])
                         continue
                     if first is None:
                         first = round((time.monotonic() - started) * 1000)
@@ -572,12 +575,14 @@ class Brain:
                             directions.append(how)
         except Exception as exc:
             error = str(exc)
-        if rest := splitter.finish():
-            await self._sentence(rest, how, generation, span)
+        if streaming_started:
+            if rest := splitter.finish():
+                await self._sentence(rest, how, generation, span)
+            await self.speech.put(EndJob(generation, span))
         span.mark("llm_done")
-        await self.speech.put(EndJob(generation, span))
         line = full.strip()
-        self.memory.feed.append(f"{name}: {line}")
+        if streaming_started:
+            self.memory.feed.append(f"{name}: {line}")
         self.trace.add(
             "llm",
             {

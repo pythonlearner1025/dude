@@ -8,6 +8,7 @@ import pytest
 
 import m8py.brain as brainmod
 from m8py.brain import Brain, Event, Heard, Memory, Summary
+from m8py.speak import EndJob, SentenceJob
 from m8py.speaking import Speaking
 from m8py.trace import Trace
 
@@ -165,6 +166,55 @@ async def test_look_records_vision_failures_and_returns_fallback(cfg, tmp_path, 
     assert picture and sight["kind"] == "sight"
     assert sight["data"]["picture"] == picture
     assert sight["data"]["error"]
+    await client.aclose()
+    await trace.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["transport", "status"])
+async def test_say_failure_before_stream_does_not_add_feed_or_open_line(cfg, tmp_path, failure):
+    def handler(request):
+        if failure == "transport":
+            raise httpx.ConnectError("llm unavailable", request=request)
+        return httpx.Response(503)
+
+    b, _, trace, client = make(cfg, tmp_path, handler)
+    before = b.memory.feed.copy()
+
+    await b.say(trace.new_span("heard"))
+
+    assert b.memory.feed == before
+    assert b.speaking.lines == 0
+    assert b.speech.empty()
+    assert trace.entries[-1]["data"]["error"]
+    await client.aclose()
+    await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_say_accepts_usage_chunk_without_choices(cfg, tmp_path):
+    usage = {"prompt_tokens": 3, "completion_tokens": 2}
+    timings = {"prompt_ms": 4, "predicted_ms": 5}
+    chunks = [
+        {"model": "mock", "choices": [{"delta": {"content": "Hello."}}]},
+        {"choices": [], "usage": usage, "timings": timings},
+        {"usage": usage, "timings": timings},
+    ]
+    body = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+
+    def handler(request):
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    b, _, trace, client = make(cfg, tmp_path, handler)
+    span = trace.new_span("heard")
+
+    await b.say(span)
+
+    assert span.data["llm_usage"] == usage
+    assert span.data["llm_timings"] == timings
+    assert b.memory.feed[-1] == "Kevin: Hello."
+    assert isinstance(await b.speech.get(), SentenceJob)
+    assert isinstance(await b.speech.get(), EndJob)
     await client.aclose()
     await trace.close()
 
