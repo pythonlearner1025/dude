@@ -3,7 +3,7 @@
   "duration": 120,
   "state_rate_hz": 2,
   "speech_cooldown": 1,
-  "settle": 8,
+  "settle": 25,
   "action_consequence_delay": 2,
   "view": {"file": "fixtures/view.png"},
   "initial_state": {

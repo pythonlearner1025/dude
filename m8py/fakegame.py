@@ -79,7 +79,8 @@ class FakeGame:
         self._offered: dict[str, set[str] | None] = {}
         self._violations: list[str] = []
         self._dead_targets: set[str] = set()
-        self._audio_after_stop = False
+        self._audio_since_say = False
+        self._allow_audio_after_stop = False
         self._awaiting_audio_end = False
         self.state = dict(self.scenario.get("initial_state", {}))
 
@@ -149,23 +150,22 @@ class FakeGame:
             self._sample_rate = int(msg.get("sample_rate", 24000))
             self._hello.set()
         elif kind == "say":
-            if not self._awaiting_audio_end:
-                self._line += 1
-                self._line_pcm.clear()
-                self._line_started = time.time()
-                self._last_say = ""
-            sentence = str(msg.get("text", ""))
-            self._last_say = " ".join(filter(None, (self._last_say, sentence)))
+            await self._finish_audio("next_say")
+            self._line += 1
+            self._line_started = time.time()
+            self._last_say = str(msg.get("text", ""))
             self._awaiting_audio_end = True
-            self._audio_after_stop = False
+            self._audio_since_say = False
+            self._allow_audio_after_stop = False
         elif kind == "stop_audio":
-            await self._finish_audio("stop_audio")
-            self._audio_after_stop = True
-            self._awaiting_audio_end = False
+            self._allow_audio_after_stop = not self._audio_since_say
+            if self._audio_since_say:
+                await self._finish_audio("stop_audio")
+                self._awaiting_audio_end = False
         elif kind == "audio_end":
             await self._finish_audio("audio_end")
             self._awaiting_audio_end = False
-            self._audio_after_stop = False
+            self._allow_audio_after_stop = False
         elif kind == "view":
             await self._send_view()
         elif kind == "action":
@@ -173,11 +173,11 @@ class FakeGame:
             await self._consequence(msg)
 
     async def _audio(self, payload: bytes) -> None:
-        if self._audio_after_stop:
+        if self._allow_audio_after_stop:
+            self._allow_audio_after_stop = False
+        elif not self._awaiting_audio_end:
             self._violations.append("audio arrived after stop_audio and before a new say")
-            self._audio_after_stop = False
-        if not self._awaiting_audio_end:
-            self._violations.append("audio arrived outside a spoken line")
+        self._audio_since_say = True
         self._line_pcm.extend(payload)
         await self.log("recv_audio", bytes=len(payload), line=self._line)
 
@@ -444,19 +444,26 @@ def check_invariants(session_dir: str | Path) -> list[str]:
     violations: list[str] = []
     open_line = False
     stopped = False
+    audio_since_say = False
+    allow_after_stop = False
     for entry in entries:
         msg = entry.get("message", {}) if entry.get("kind") == "recv" else {}
         if msg.get("type") == "say":
-            open_line, stopped = True, False
+            open_line, stopped, audio_since_say = True, False, False
         elif msg.get("type") == "audio_end":
             if not open_line:
                 violations.append("audio_end without a preceding say")
-            open_line, stopped = False, False
+            open_line, stopped, allow_after_stop = False, False, False
         elif msg.get("type") == "stop_audio":
-            open_line, stopped = False, True
+            allow_after_stop = open_line and not audio_since_say
+            if not allow_after_stop:
+                open_line, stopped = False, True
         elif entry.get("kind") == "recv_audio" and stopped:
             violations.append("audio after stop_audio before a new say")
             stopped = False
+        elif entry.get("kind") == "recv_audio":
+            audio_since_say = True
+            allow_after_stop = False
     if open_line:
         violations.append("spoken line had no audio_end")
     return violations
