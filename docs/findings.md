@@ -276,3 +276,24 @@ standing orders are forgotten in ~10-30 s, conditional orders have no condition 
 spatial references have no referents, and multi-step tasks ("go clear that area") have no
 sequencer or completion events. These are architectural gaps, not model-quality gaps; the design
 answer is §4.7 of `docs/general-architecture.md`.
+
+## 8. Third playtest: first run of Kev / Validator / Voice / Reflect (a30)
+
+Session `1793160871` (6 min, build `490aafe`; the first ~95 s were off-game talk picked up by the
+mic, then a30 from a fresh start). 68 player lines, 33 Kevin replies, 44 Reflect calls.
+Speech end → first audio p50 1.95 s.
+
+| Problem seen | Measured | Cause | Status |
+|---|---|---|---|
+| Kevin froze in combat | 14 of 68 player lines got no decision; 43 s with no Kev call ("Don't shoot", "Stop shooting", "Kevin, hello?") | Joint action+target questions reached 644 tokens when a dropship unloaded; Kev's systemone needs the whole question in one micro-batch (512) and returned 400 | Fixed `bda2c0c`: Kev `-b/-ub 1024` (2048 needs a 2 GB compute buffer and does not fit); an 800-token question now passes; VRAM 22.3 / 23.0 GB |
+| Kevin narrated himself in third person | 19 of 33 replies added a "Kevin is doing: leaning against a wall…" line; 11 such sentences were spoken | The Voice runtime rule told the model to "describe what he is actually doing according to the 'Kevin is doing' line"; each narrated reply then sat in the append-only history and was copied | Fixed `2bb183c`: rule now says speak only Kevin's words, never narrate; replaying this session's requests: old rule narrated 4/4, new rule 0/8 |
+| Reflect made nonsense orders | Off-game talk became orders ("Place the phone sideways"); the internal trigger reason became an order ("Resume after voice.") | Reason line was in the prompt; no addressee signal | Reason removed from the prompt (kept in the trace). Off-game talk still becomes orders in replay (3/3): the transcript alone cannot tell who the player is talking to |
+| Reflect memory filled with momentary state | `remember` grew to "Kevin is 6 m behind Chief", "Kevin is aiming at a boulder", "Kevin is badly hurt" and near-duplicate variants | Model re-emits the whole list with variations; code appended anything not matched exactly | `remember` is now a full replacement list and the prompt excludes positions/health/targets; replay: positions gone, health still slips in |
+| Standing orders still did not stick | Final orders: `["be careful"]` | The conditional order ("wait for them to get off and then shoot") was given during the Kev outage; "stop firing, they're too far" was superseded seconds later by "shoot at these guys". Reflect itself was cut off 26 of 44 times by Voice; completed calls took 4-12 s | Not addressed |
+| Kevin answered unevenly | Of 54 decided player lines, 31 got a reply; Kev's `speak` score for player lines sat at 0.46-0.56 | Speak? is asked for player lines too (by design), and the score is near the 0.5 cutoff for almost everything, including direct requests | Not addressed |
+| Kevin reacted to insults nobody said | STT heard "Kevin" as "Jebby", "Debbie", "David", "Dabbit", "Devin", "Plate"; Kevin got angry at the "nicknames" and Reflect stored them as relationship facts | Parakeet has no bias toward the mate's name | Not addressed |
+| Kevin was cut off constantly | Many replies cut mid-sentence | VAD splits one utterance into fragments ("Uh", "Like", "Yeah.") and each fragment barges in and starts a new turn | Not addressed (known since §5) |
+| Voice claimed actions it was not doing | "firing a rapid burst at the grunts" while the chosen action was `nothing`; "Shoot at that guy" → `go_aim` | Voice still free-writes action claims; Kev picked the wrong action | Not addressed |
+
+The direct reflex worked when Kev was up: "Kevin, stop firing… you're not hitting any of them"
+→ `hold_fire` with is_command 0.64.
