@@ -254,3 +254,25 @@ Takeaways for the general architecture (§ `docs/general-architecture.md`):
 - **The model matters more than the prompt for brevity and banter** — a 12B that follows style
   instructions beat a faster 9B that didn't; keeping latency there needs a smaller/faster decoder
   or speculative decoding (Gemma's MTP draft head is published alongside the GGUF).
+
+### Why orders don't stick (measured)
+
+`tools/order_window.py` replays the feed and measures how long a player's order stays inside
+Kev's view (m8 shows Kev only the newest 20 feed lines, `KEV_FEED_LINES`):
+
+| Player order | Gone from Kev's window after |
+| --- | ---: |
+| "So hold your fire. Hold your fire." | 11 s |
+| "Always be ahead of me." | 24 s |
+| "Yeah, but let's hide behind this rock." | 24 s |
+| "Behind that rock, go clear that area out." | 22 s |
+| "Go where I'm pointing, go." | 27 s |
+
+And even inside the window the order often had nothing to bind to: the actions the game offered
+at that point were `stay, shoot_chief, switch_weapon, search_weapons, search_vehicles, go_to,
+go_aim, jump, crouch, look, flashlight` — no "lead", no conditional fire, no "move behind X" — and
+the state text names Kevin, the player and enemies but **no terrain** (no rocks, cover, paths). So:
+standing orders are forgotten in ~10-30 s, conditional orders have no condition evaluator,
+spatial references have no referents, and multi-step tasks ("go clear that area") have no
+sequencer or completion events. These are architectural gaps, not model-quality gaps; the design
+answer is §4.7 of `docs/general-architecture.md`.

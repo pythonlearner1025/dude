@@ -155,6 +155,81 @@ Vision becomes a tool, not a channel: triggered by `look`/`go_to`, scene changes
 downscaled to ≤768 px, run asynchronously, and its caption enters the feed when ready. Never on
 the critical path of combat decisions.
 
+
+### 4.7 Following instructions: directives, a task executor, and spatial grounding
+
+The two playtests (findings §5, §7) show the companion's biggest failure is not talk but
+*obedience*: standing orders ("always stay ahead of me"), conditional orders ("hold fire until
+they're close"), spatial orders ("go behind that rock", "go where I'm pointing") and multi-step
+tasks ("go clear that area out") are forgotten in 10-30 s or never executable. m8's loop is
+"one decision per event, one atomic action, picked from the last 20 lines" — there is nowhere for
+an instruction to live, nothing that checks a condition every tick, nothing that knows where a
+rock is, and nothing that sequences skills toward a goal. The fix is a layer between talk and
+action:
+
+```
+player line ──► Router ──┬─ chat / question ───────────────► Dialogue LLM
+ (STT)          (tiny)   ├─ filler ("okay", "um") ──────────► silence / 2-word ack
+                         └─ command / order / cancel ─► Compiler (LLM, JSON schema,
+                                                        grounded in skills + referents)
+                                                             │
+                     ┌───────────────────────────────────────▼───────────────────────┐
+                     │ Directive store (blackboard, persists until revoked)           │
+                     │  standing: lead(ahead=8 m) · fire(hold, until enemy<10 m)      │
+                     │  task:     clear_area(landmark 12) → then regroup              │
+                     └───────────────────────────────┬───────────────────────────────┘
+                                                     │ evaluated every tick (10-30 Hz)
+                     ┌───────────────────────────────▼───────────────────────────────┐
+                     │ Executor: behaviour tree over the adapter's primitive skills   │
+                     │  move_to(point) · take_cover(landmark, from) · engage(target) │
+                     │  fire_mode(hold|free) · stance · board(vehicle) · follow/lead  │
+                     │  + safety (self-preservation, no friendly fire)                │
+                     └───────────────────────────────┬───────────────────────────────┘
+                                                     │ lifecycle: started/done/failed(reason)
+                                                     ▼
+                            feed + Dialogue LLM ("In position." / "No path up there, Chief.")
+```
+
+1. **Router (every player utterance).** Classify into chat, question, filler, command, standing
+   order, or cancel ("stop", "forget that"). A small classifier or one constrained LLM call.
+   Fillers get silence — at ~10 player lines a minute this alone removes a lot of noise.
+2. **Compiler.** One LLM call with a JSON schema turns a command into a *program* over the
+   skills the adapter advertises (typed parameters, not free text): an immediate task, a
+   standing rule with a condition and a scope, or a cancel. It is grounded in referents (below)
+   and in the current directives, so "no, further left" edits the active task.
+3. **Directive store.** Standing orders and the active task live outside the rolling feed, are
+   shown in every prompt ("Standing orders: lead 8 m ahead; weapons hold until enemies are
+   within 10 m"), on the brain page, and in memory snapshots, and persist until revoked or
+   fulfilled. Nothing scrolls away.
+4. **Executor.** A behaviour tree evaluated at game cadence composes primitive skills to satisfy
+   the task and the standing rules at once (lead = keep a point N m ahead of the player along their
+   heading, re-planned every tick; "hold fire until close" = fire mode gated on a distance
+   condition). Conditions use exact typed state, not prose. Every task reports
+   started/done/failed(reason) — the "honest failure" lines players liked come from here.
+5. **Spatial grounding.** The adapter adds referents to the state: the aim point (world position
+   and the object under the crosshair) and nearby landmarks (rocks, cover, vehicles, doors: id,
+   position, size). The LLM only picks *which* referent ("the rock you're aiming at" → landmark
+   12); geometry ("behind it relative to the threats", "ahead of the player") is code. Vision is the
+   fallback when the referent isn't in the index. m8's screen-grid spots (`go_to`) become one
+   referent source among several.
+6. **Speech bound to execution.** Lines are generated after compilation with the program as a
+   fact ("you are now: moving to landmark 12, weapons hold"), may only describe that, and task
+   events produce short status lines. This closes the says ≠ does gap (findings §5, §7).
+7. **Where Kev fits.** Unprompted, moment-to-moment choices (react to an event, whether to speak)
+   remain a closed-set decision — now *within* the active directives, and trained per game.
+
+**Free training signal.** Players label failures for us: the same command repeated within
+~10 s, "you're not listening", "no, the other one", and corrections that edit the active task are
+automatic negative labels for the router/compiler/executor; time-to-comply and rule adherence
+(e.g. fraction of time actually ahead of the player while "lead" is active) are measurable from
+telemetry. A command-following benchmark (scripted fake-game scenarios with a small 2-D world
+model, plus replayed real logs) makes this a regression suite.
+
+**Generality.** Each game adapter implements the same primitive-skill and referent interface
+(Halo mod in C, Minecraft via Mineflayer, Rust via a server plugin); router, compiler, directive
+store, executor and dialogue are shared. This is the piece that turns "an NPC that talks" into a
+teammate that takes orders.
+
 ## 5. The character factory (training infrastructure)
 
 Goal: a new character for a new game in days, improving with every session.

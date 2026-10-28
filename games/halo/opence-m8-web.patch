@@ -1,17 +1,18 @@
 diff --git a/port/linux/README.md b/port/linux/README.md
-index 9dc7c289..02f1f996 100644
+index 9dc7c289..e68a180f 100644
 --- a/port/linux/README.md
 +++ b/port/linux/README.md
-@@ -377,6 +377,7 @@ the setting for one start of the game. It has priority over the file.
+@@ -377,6 +377,8 @@ the setting for one start of the game. It has priority over the file.
  | `game.console_log` | `"important"` | `HALO_CONSOLE_LOG` | What the console shows on the screen. `"important"`: bans, players that the host drops for cheating, the reasons that the game refuses a command, and the asserts that stop the game. `"all"`: all the lines. `"none"`: only the asserts that stop the game. The output of a command always shows. `debug.txt` gets all the lines. |
  | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
  | `game.enhanced_animations` | `true` | `HALO_ENHANCED_ANIMATIONS` | `true`: the player bipeds' grenade throws keep their legs moving, blended by speed and direction (crouched throws stay crouched, throws in the air use the jump's legs), Warthog and Scorpion riders stay seated to throw and let go of the grips to throw and reload, and a player turns with the aim while throwing, as while meleeing. `false`: the original animations, which freeze the legs during a throw and stand a rider up. Only in config.toml, not in the menus. |
 +| `game.skip_cinematics` | `true` | `HALO_SKIP_CINEMATICS` | Skip a cinematic automatically when its script makes it skippable. `false`: press Jump to skip it as usual. |
++| `game.fast_forward_cinematics` | `true` | `HALO_FAST_FORWARD_CINEMATICS` | Run an unskippable solo cinematic at eight times its scripted speed, with its audio almost muted. `false`: leave it at its scripted speed. The normal speed resumes exactly when the cinematic ends. |
  | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
  | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
  | `network.address` | `""` | `HALO_NET_ADDRESS` | The IPv4 address of this machine for system link. Refer to "Play on one computer". |
 diff --git a/port/linux/game/companion.c b/port/linux/game/companion.c
-index f81247de..70f0fb96 100644
+index f81247de..0c1fc3fc 100644
 --- a/port/linux/game/companion.c
 +++ b/port/linux/game/companion.c
 @@ -2506,6 +2506,22 @@ static void companion_send_save(
@@ -56,7 +57,17 @@ index f81247de..70f0fb96 100644
  /* scripted dialogue beginning to play, for mate to hear: Cortana and the crew
  on the radio (no source), and the cutscenes' (heard, not answered) */
  void companion_note_sound(
-@@ -2837,6 +2865,7 @@ void companion_update(
+@@ -2768,7 +2796,8 @@ void companion_note_sound(
+ 		definition->sound_class != _sound_class_scripted_dialog_to_other &&
+ 		definition->sound_class != _sound_class_scripted_dialog_force_unspatialized) ||
+ 		permutation->compression != 1 /* Xbox ADPCM, the only one that plays */ ||
+-		game_engine_running() || network_game_distributed_client() || !mate_link_connected())
++		game_engine_running() || network_game_distributed_client() || !mate_link_connected() ||
++		cinematic_fast_forwarding())
+ 	{
+ 		return;
+ 	}
+@@ -2837,6 +2866,7 @@ void companion_update(
  	struct unit_datum *player_unit;
  
  	mate_link_start();
@@ -360,16 +371,19 @@ index f90105dc..763bb188 100644
  
  void mate_link_set_radio(float radio)
 diff --git a/port/linux/src/port_config.c b/port/linux/src/port_config.c
-index 94342af9..6fa73e9c 100644
+index 94342af9..b1201b57 100644
 --- a/port/linux/src/port_config.c
 +++ b/port/linux/src/port_config.c
-@@ -313,6 +313,9 @@ static const struct config_setting config_settings[] =
+@@ -313,6 +313,12 @@ static const struct config_setting config_settings[] =
  		"to throw and reload, and a player turns with the aim while throwing;\n"
  		"false: the original animations, which freeze the legs and stand a\n"
  		"rider up." },
 +	{ "game.skip_cinematics", _config_boolean, "true", "HALO_SKIP_CINEMATICS", _environment_value, _platform_all,
 +		"Skip a cinematic as soon as its script makes it skippable; false leaves\n"
 +		"the stock jump-button skip." },
++	{ "game.fast_forward_cinematics", _config_boolean, "true", "HALO_FAST_FORWARD_CINEMATICS", _environment_value, _platform_all,
++		"Run an unskippable solo cinematic at eight times the game's normal speed,\n"
++		"with its audio almost muted; false leaves it at its scripted speed." },
  	{ "game.custom_edition", _config_boolean, "true", "HALO_CUSTOM_EDITION", _environment_value, _platform_all,
  		"Load and run Halo Custom Edition maps (not those that need OpenSauce):\n"
  		"put them and Custom Edition's bitmaps.map, sounds.map and loc.map in\n"
@@ -1011,7 +1025,7 @@ index 5d22e1cd..9f854866 100644
 +  }
 +});
 diff --git a/source/cutscene/cinematics.c b/source/cutscene/cinematics.c
-index ab5c78ae..60569b3a 100644
+index ab5c78ae..4a105be2 100644
 --- a/source/cutscene/cinematics.c
 +++ b/source/cutscene/cinematics.c
 @@ -66,6 +66,7 @@ symbols in this file:
@@ -1066,7 +1080,35 @@ index ab5c78ae..60569b3a 100644
  	cinematic_globals->can_be_skipped = FALSE;
  
  	return;
-@@ -296,6 +306,16 @@ void cinematic_set_title_delayed(
+@@ -239,6 +249,27 @@ boolean cinematic_in_progress(
+ 	return cinematic_globals->in_progress;
+ }
+ 
++/* port: the automatic revert remains preferable wherever the map exposes
++one. Outside such a safe region, advance the engine's ordinary game clock
++faster in a solo game. The speed itself is applied in game_time.c, without
++changing the script's game_speed value. */
++boolean cinematic_fast_forwarding(
++	void)
++{
++	boolean automatic_skip_ready;
++
++	if (!cinematic_globals || !cinematic_globals->in_progress ||
++		game_connection() != _game_connection_local ||
++		!config_boolean("game.fast_forward_cinematics"))
++	{
++		return FALSE;
++	}
++	automatic_skip_ready = cinematic_globals->can_be_skipped &&
++		config_boolean("game.skip_cinematics") &&
++		game_state_port_saved_game_valid() && !main_saving_map();
++	return !automatic_skip_ready;
++}
++
+ void cinematic_stop(
+ 	void)
+ {
+@@ -296,6 +327,16 @@ void cinematic_set_title_delayed(
  void cinematic_render(
  	void)
  {
@@ -1083,6 +1125,80 @@ index ab5c78ae..60569b3a 100644
  	if ((cinematic_globals->show_letterbox ||
  		cinematic_globals->letterbox_amount > 0.0f) &&
  		!ui_widgets_active())
+diff --git a/source/cutscene/cinematics.h b/source/cutscene/cinematics.h
+index c683d8a3..82ab7e7e 100644
+--- a/source/cutscene/cinematics.h
++++ b/source/cutscene/cinematics.h
+@@ -66,6 +66,10 @@ void cinematic_suppress_bsp_object_creation(
+ 	boolean suppress);
+ boolean cinematic_in_progress(
+ 	void);
++/* port: whether an unskippable solo cinematic is running at the faster
++game-time rate (game_time.c) */
++boolean cinematic_fast_forwarding(
++	void);
+ void cinematic_stop(
+ 	void);
+ void cinematic_set_title_delayed(
+diff --git a/source/game/game_time.c b/source/game/game_time.c
+index 5de8ef02..a5def531 100644
+--- a/source/game/game_time.c
++++ b/source/game/game_time.c
+@@ -75,6 +75,7 @@ symbols in this file:
+ #include "networking/network_game_globals.h"
+ #include "networking/network_server_manager.h"
+ #include "saved games/game_state.h"
++#include "cutscene/cinematics.h" /* port: cinematic_fast_forwarding */
+ #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
+ /* port/linux/game/network_distributed.c's */
+ void network_distributed_tick(void);
+@@ -117,6 +118,19 @@ struct game_time_globals_struct
+ 
+ static struct game_time_globals_struct *game_time_globals;
+ 
++/* port: unskippable cinematics run through the engine's ordinary time-rate
++path. This is an overlay, not a replacement for a map script's game_speed,
++so ending the cinematic restores that value exactly. */
++static real game_time_effective_speed(
++	void)
++{
++	real speed = game_time_globals->speed;
++
++	if (cinematic_fast_forwarding())
++		speed *= 8.0f;
++	return MIN(speed, 100.0f);
++}
++
+ /* ---------- public code */
+ 
+ boolean game_time_initialized(
+@@ -281,7 +295,7 @@ real game_time_get_tick_fraction(
+ 
+ 	if (!game_time_globals || !game_time_globals->active || game_time_globals->paused)
+ 		return 1.0f;
+-	fraction = game_time_globals->leftover_dt * game_time_globals->speed * TICKS_PER_SECOND;
++	fraction = game_time_globals->leftover_dt * game_time_effective_speed() * TICKS_PER_SECOND;
+ 	return PIN(fraction, 0.0f, 1.0f);
+ }
+ 
+@@ -294,7 +308,7 @@ real game_time_get_speed(
+ 	set before it joined too: cheats_network_client_enforce) */
+ 	if (network_game_distributed_client())
+ 		return 1.0f;
+-	return game_time_globals->speed;
++	return game_time_effective_speed();
+ }
+ 
+ void game_time_set_speed(
+@@ -385,7 +399,7 @@ void game_time_update(
+ 	{
+ 		long connection;
+ 		long ticks_elapsed;
+-		real ticks_per_second = game_time_globals->speed*TICKS_PER_SECOND;
++		real ticks_per_second = game_time_effective_speed()*TICKS_PER_SECOND;
+ 
+ 		/* The native builds draw several frames per tick
+ 		(port/linux/game/render_interpolation.c). A frame that runs no tick has
 diff --git a/source/hs/hs.c b/source/hs/hs.c
 index c93adb8f..6664bb4e 100644
 --- a/source/hs/hs.c
@@ -1160,6 +1276,30 @@ index a6159e0d..36697fac 100644
  char *main_get_multiplayer_map_name(
  	void);
  
+diff --git a/source/sound/sound_manager.c b/source/sound/sound_manager.c
+index d4916b0c..c61cabf7 100644
+--- a/source/sound/sound_manager.c
++++ b/source/sound/sound_manager.c
+@@ -237,6 +237,7 @@ symbols in this file:
+ #include "game/game.h"
+ #include "game/game_globals.h"
+ #include "game/players.h"
++#include "cutscene/cinematics.h" /* port: cinematic_fast_forwarding */
+ #include "render/render_debug.h"
+ #include "scenario/scenario.h"
+ #include "tag_files/tag_files.h"
+@@ -1149,6 +1150,11 @@ static real sound_manager_master_gain(
+ {
+ 	real gain = sound_class_get_gain(class_index) * sound_manager_port_volume(class_index);
+ 
++	/* port: accelerated dialogue and effects are noise rather than useful
++	audio; leave a trace instead of changing or stopping the map's sounds. */
++	if (cinematic_fast_forwarding())
++		gain *= 0.02f;
++
+ 	if (class_index != _sound_class_scripted_dialog_to_player &&
+ 		class_index != _sound_class_scripted_dialog_to_other &&
+ 		class_index != _sound_class_scripted_dialog_force_unspatialized)
 diff --git a/tools/make_maps_manifest.py b/tools/make_maps_manifest.py
 new file mode 100755
 index 00000000..6602d0f5
