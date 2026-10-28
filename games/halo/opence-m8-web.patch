@@ -1,0 +1,524 @@
+diff --git a/port/linux/src/mate_link.c b/port/linux/src/mate_link.c
+index f90105dc..763bb188 100644
+--- a/port/linux/src/mate_link.c
++++ b/port/linux/src/mate_link.c
+@@ -31,6 +31,10 @@ him) empties it.
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#ifdef HALO_WEB
++#include <emscripten.h>
++#endif
++
+ #define MATE_PORT 47800
+ #define MATE_RATE 48000
+ /* the voice buffered at most: speech arrives faster than it plays */
+@@ -82,6 +86,15 @@ static float mate_resample_phase, mate_last_sample;
+ static char mate_inbox[MATE_INBOX_MESSAGES][MATE_MESSAGE_SIZE];
+ static int mate_inbox_read, mate_inbox_count;
+ 
++#ifdef HALO_WEB
++/* web_library.js owns the page-thread WebSocket. Its messages are chunks of
++the same byte stream the native TCP connection carries. */
++void web_js_mate_open(void);
++void web_js_mate_send(unsigned char *bytes, int size);
++static unsigned char *mate_web_bytes;
++static unsigned long mate_web_count, mate_web_capacity;
++#endif
++
+ static int mate_receive_exactly(int socket, void *buffer, int length)
+ {
+ 	char *bytes = buffer;
+@@ -220,6 +233,102 @@ static void mate_handle_json(const char *json)
+ 	pthread_mutex_unlock(&mate_lock);
+ }
+ 
++#ifdef HALO_WEB
++EMSCRIPTEN_KEEPALIVE void mate_link_web_opened(void)
++{
++	if (mate_socket < 0)
++		mate_socket = 1;
++}
++
++EMSCRIPTEN_KEEPALIVE void mate_link_web_closed(void)
++{
++	if (mate_socket >= 0)
++	{
++		mate_socket = -1;
++		platform_log("mate: disconnected");
++		mate_clear_voice();
++	}
++	mate_web_count = 0;
++}
++
++EMSCRIPTEN_KEEPALIVE void mate_link_web_data(const unsigned char *bytes, int size)
++{
++	unsigned long needed;
++
++	if (!bytes || size <= 0)
++		return;
++	needed = mate_web_count + (unsigned long)size;
++	if (needed + 1 > mate_web_capacity)
++	{
++		unsigned long capacity = mate_web_capacity ? mate_web_capacity : 4096;
++		unsigned char *larger;
++
++		while (capacity < needed + 1 && capacity < 64UL * 1024 * 1024)
++			capacity *= 2;
++		if (capacity < needed + 1)
++		{
++			mate_link_web_closed();
++			return;
++		}
++		larger = realloc(mate_web_bytes, capacity);
++		if (!larger)
++			return;
++		mate_web_bytes = larger;
++		mate_web_capacity = capacity;
++	}
++	memcpy(mate_web_bytes + mate_web_count, bytes, (size_t)size);
++	mate_web_count = needed;
++	while (mate_web_count >= 5)
++	{
++		unsigned long length = (unsigned long)mate_web_bytes[1] << 24 |
++			(unsigned long)mate_web_bytes[2] << 16 | (unsigned long)mate_web_bytes[3] << 8 |
++			mate_web_bytes[4];
++		unsigned char after;
++
++		if (length > 64UL * 1024 * 1024)
++		{
++			mate_link_web_closed();
++			return;
++		}
++		if (mate_web_count < length + 5)
++			break;
++		after = mate_web_bytes[length + 5];
++		mate_web_bytes[length + 5] = 0;
++		if (mate_web_bytes[0] == MATE_KIND_JSON)
++			mate_handle_json((const char *)mate_web_bytes + 5);
++		else if (mate_web_bytes[0] == MATE_KIND_AUDIO)
++			mate_add_voice(mate_web_bytes + 5, (int)length);
++		mate_web_bytes[length + 5] = after;
++		mate_web_count -= length + 5;
++		memmove(mate_web_bytes, mate_web_bytes + length + 5, mate_web_count);
++	}
++}
++
++static void mate_web_send(unsigned char kind, const void *first, unsigned long first_size,
++	const void *second, unsigned long second_size)
++{
++	unsigned long length = first_size + second_size;
++	unsigned char *frame;
++
++	if (mate_socket < 0 || length > 0x7FFFFFFFUL)
++		return;
++	frame = malloc(length + 5);
++	if (!frame)
++		return;
++	frame[0] = kind;
++	frame[1] = (unsigned char)(length >> 24);
++	frame[2] = (unsigned char)(length >> 16);
++	frame[3] = (unsigned char)(length >> 8);
++	frame[4] = (unsigned char)length;
++	if (first_size)
++		memcpy(frame + 5, first, first_size);
++	if (second_size)
++		memcpy(frame + 5 + first_size, second, second_size);
++	web_js_mate_send(frame, (int)(length + 5));
++}
++#endif
++
++#ifndef HALO_WEB
+ static void *mate_thread(void *unused)
+ {
+ 	(void)unused;
+@@ -273,6 +382,7 @@ static void *mate_thread(void *unused)
+ 	}
+ 	return NULL;
+ }
++#endif
+ 
+ void mate_link_start(void)
+ {
+@@ -304,7 +414,11 @@ void mate_link_start(void)
+ 	mate_biquad_set(&mate_band[2], 3000.0f, 0);
+ 	mate_biquad_set(&mate_band[3], 3000.0f, 0);
+ 	if (mate_ring)
++#ifdef HALO_WEB
++		web_js_mate_open();
++#else
+ 		pthread_create(&thread, NULL, mate_thread, NULL);
++#endif
+ }
+ 
+ int mate_link_connected(void)
+@@ -331,6 +445,9 @@ int mate_link_next_message(char *buffer, int size)
+ void mate_link_send(const char *json)
+ {
+ 	unsigned long length = (unsigned long)strlen(json);
++#ifdef HALO_WEB
++	mate_web_send(MATE_KIND_JSON, json, length, NULL, 0);
++#else
+ 	unsigned char header[5];
+ 
+ 	header[0] = MATE_KIND_JSON;
+@@ -345,6 +462,7 @@ void mate_link_send(const char *json)
+ 		posix_socket_send(mate_socket, json, (int)length, 0);
+ 	}
+ 	pthread_mutex_unlock(&mate_send_lock);
++#endif
+ }
+ 
+ void mate_link_send_hear(const char *json, const short *samples, unsigned long count)
+@@ -360,6 +478,20 @@ void mate_link_send_hear(const char *json, const short *samples, unsigned long c
+ 	header[4] = (unsigned char)length;
+ 	header[5] = (unsigned char)(json_length >> 8);
+ 	header[6] = (unsigned char)json_length;
++#ifdef HALO_WEB
++	{
++		unsigned char *payload = malloc(length);
++
++		if (!payload)
++			return;
++		payload[0] = header[5];
++		payload[1] = header[6];
++		memcpy(payload + 2, json, json_length);
++		memcpy(payload + 2 + json_length, samples, count * 2);
++		mate_web_send(MATE_KIND_HEAR, payload, length, NULL, 0);
++		free(payload);
++	}
++#else
+ 	pthread_mutex_lock(&mate_send_lock);
+ 	if (mate_socket >= 0)
+ 	{
+@@ -369,6 +501,7 @@ void mate_link_send_hear(const char *json, const short *samples, unsigned long c
+ 		posix_socket_send(mate_socket, samples, (int)(count * 2), 0);
+ 	}
+ 	pthread_mutex_unlock(&mate_send_lock);
++#endif
+ }
+ 
+ void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned long size)
+@@ -384,6 +517,19 @@ void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned lo
+ 	header[4] = (unsigned char)length;
+ 	header[5] = (unsigned char)(json_length >> 8);
+ 	header[6] = (unsigned char)json_length;
++#ifdef HALO_WEB
++	{
++		unsigned char *about = malloc(json_length + 2);
++
++		if (!about)
++			return;
++		about[0] = header[5];
++		about[1] = header[6];
++		memcpy(about + 2, json, json_length);
++		mate_web_send(MATE_KIND_VIEW, about, json_length + 2, rgb, size);
++		free(about);
++	}
++#else
+ 	pthread_mutex_lock(&mate_send_lock);
+ 	if (mate_socket >= 0)
+ 	{
+@@ -392,6 +538,7 @@ void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned lo
+ 		posix_socket_send(mate_socket, rgb, (int)size, 0);
+ 	}
+ 	pthread_mutex_unlock(&mate_send_lock);
++#endif
+ }
+ 
+ void mate_link_set_radio(float radio)
+diff --git a/port/web/site/app.js b/port/web/site/app.js
+index 860b5869..cde2da22 100644
+--- a/port/web/site/app.js
++++ b/port/web/site/app.js
+@@ -33,6 +33,148 @@ const params = new URLSearchParams(location.search);
+ const WEB_MEMORY_BYTES = 0x88000000;
+ const MAXIMUM_LOG_LINES = 20000;
+ 
++// ---------- m8 companion and page microphone
++
++const M8_URL_KEY = 'halo-m8-url';
++const MIC_URL_KEY = 'halo-mic-url';
++
++function stored(key, fallback) {
++  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
++}
++
++function micFromM8(value) {
++  try {
++    const url = new URL(value);
++    url.pathname = '/mic';
++    url.search = '';
++    url.hash = '';
++    return url.href;
++  } catch {
++    return 'ws://127.0.0.1:8091/mic';
++  }
++}
++
++let m8URL = params.get('m8') || stored(M8_URL_KEY, 'ws://127.0.0.1:8091/game');
++let micURL = params.get('mic') || stored(MIC_URL_KEY, micFromM8(m8URL));
++$('m8-url').value = m8URL;
++$('mic-url').value = micURL;
++
++function saveLinkInputs(m8Changed) {
++  m8URL = $('m8-url').value.trim();
++  if (m8Changed && !params.has('mic')) $('mic-url').value = micFromM8(m8URL);
++  micURL = $('mic-url').value.trim();
++  try {
++    localStorage.setItem(M8_URL_KEY, m8URL);
++    localStorage.setItem(MIC_URL_KEY, micURL);
++  } catch {
++    // private storage may be disabled
++  }
++  if (game && game.haloSetM8URL) game.haloSetM8URL(m8URL);
++}
++
++$('m8-url').addEventListener('change', () => saveLinkInputs(true));
++$('mic-url').addEventListener('change', () => saveLinkInputs(false));
++
++let micEnabled = false;
++let micSocket = null;
++let micReconnect = 0;
++let micStream = null;
++let micContext = null;
++let micProcessor = null;
++let micPosition = 0;
++let micLastSample = 0;
++let micFrame = [];
++
++function setMicStatus(text) { $('mic-status').textContent = text; }
++
++function connectMic() {
++  clearTimeout(micReconnect);
++  if (!micEnabled) return;
++  let socket;
++  try { socket = new WebSocket(micURL); } catch {
++    setMicStatus('Invalid address');
++    micReconnect = setTimeout(connectMic, 2000);
++    return;
++  }
++  micSocket = socket;
++  socket.binaryType = 'arraybuffer';
++  setMicStatus('Connecting…');
++  socket.onopen = () => setMicStatus('Connected');
++  socket.onclose = () => {
++    if (micSocket === socket) micSocket = null;
++    if (micEnabled) {
++      setMicStatus('Reconnecting…');
++      micReconnect = setTimeout(connectMic, 2000);
++    }
++  };
++  socket.onerror = () => socket.close();
++}
++
++function sendMicInput(input, rate) {
++  let sum = 0;
++  for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
++  $('mic-level').value = Math.min(1, Math.sqrt(sum / Math.max(1, input.length)) * 5);
++  const source = new Float32Array(input.length + 1);
++  source[0] = micLastSample;
++  source.set(input, 1);
++  const step = rate / 16000;
++  let position = micPosition;
++  while (position < input.length) {
++    const at = Math.floor(position);
++    const part = position - at;
++    const sample = source[at] + (source[at + 1] - source[at]) * part;
++    micFrame.push(Math.max(-32768, Math.min(32767, Math.round(sample * 32767))));
++    if (micFrame.length === 320) {
++      if (micSocket && micSocket.readyState === WebSocket.OPEN) {
++        micSocket.send(new Int16Array(micFrame).buffer);
++      }
++      micFrame = [];
++    }
++    position += step;
++  }
++  micPosition = position - input.length;
++  micLastSample = input[input.length - 1] || micLastSample;
++}
++
++async function startMic() {
++  saveLinkInputs(false);
++  try {
++    micStream = await navigator.mediaDevices.getUserMedia({ audio: {
++      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
++      channelCount: 1,
++    } });
++    micContext = new AudioContext();
++    await micContext.resume();
++    const source = micContext.createMediaStreamSource(micStream);
++    micProcessor = micContext.createScriptProcessor(2048, 1, 1);
++    const silent = micContext.createGain();
++    silent.gain.value = 0;
++    micProcessor.onaudioprocess = (event) => sendMicInput(event.inputBuffer.getChannelData(0), micContext.sampleRate);
++    source.connect(micProcessor);
++    micProcessor.connect(silent).connect(micContext.destination);
++    micEnabled = true;
++    $('mic-toggle').textContent = 'Turn microphone off';
++    connectMic();
++  } catch (error) {
++    setMicStatus('Unavailable: ' + (error.message || error));
++  }
++}
++
++async function stopMic() {
++  micEnabled = false;
++  clearTimeout(micReconnect);
++  if (micSocket) micSocket.close();
++  if (micStream) for (const track of micStream.getTracks()) track.stop();
++  if (micContext) await micContext.close();
++  micSocket = micStream = micContext = micProcessor = null;
++  micFrame = [];
++  $('mic-level').value = 0;
++  $('mic-toggle').textContent = 'Turn microphone on';
++  setMicStatus('Off');
++}
++
++$('mic-toggle').addEventListener('click', () => micEnabled ? stopMic() : startMic());
++
+ // ---------- the log: the game's output, for the player to send
+ 
+ const log = [];
+@@ -589,6 +731,7 @@ async function play() {
+     const options = {
+       canvas,
+       arguments: gameArguments(),
++      haloM8URL: m8URL,
+       print: (text) => { logLine(text); console.log(text); },
+       printErr: (text) => {
+         logLine(text);
+diff --git a/port/web/site/index.html b/port/web/site/index.html
+index 1f1b8bc9..f2b1c0d3 100644
+--- a/port/web/site/index.html
++++ b/port/web/site/index.html
+@@ -46,6 +46,18 @@
+       Xbox) into this browser's storage for this site. Nothing is uploaded, and the site serves no game data.</p>
+   </section>
+ 
++  <section class="panel" id="companion-panel" aria-labelledby="companion-title">
++    <h2 id="companion-title">Kevin (m8 companion)</h2>
++    <label class="field">Game link <input id="m8-url" type="url" spellcheck="false"></label>
++    <label class="field">Microphone link <input id="mic-url" type="url" spellcheck="false"></label>
++    <div class="actions mic-actions">
++      <button id="mic-toggle">Turn microphone on</button>
++      <span id="mic-status" class="status">Off</span>
++      <meter id="mic-level" min="0" max="1" value="0" aria-label="Microphone level"></meter>
++    </div>
++    <p class="note">The browser removes echo, noise and level differences before sending your microphone to m8.</p>
++  </section>
++
+   <section class="panel" id="room-panel" aria-labelledby="room-title">
+     <h2 id="room-title">Play together</h2>
+     <p id="room-status" class="status">Play system link with friends in their browsers: create a room and send them
+diff --git a/port/web/site/style.css b/port/web/site/style.css
+index e7c696a1..9a8fb4be 100644
+--- a/port/web/site/style.css
++++ b/port/web/site/style.css
+@@ -100,6 +100,14 @@ details.panel[open] summary { margin-bottom: 12px; }
+ 
+ .status { margin: 0 0 12px; }
+ .note { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
++.field { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; margin: 8px 0; }
++.field input {
++  min-width: 0; padding: 7px 9px; border: 1px solid var(--panel-edge); border-radius: 6px;
++  background: #0a0e14; color: var(--text); font: 13px ui-monospace, monospace;
++}
++.mic-actions { align-items: center; margin-top: 10px; }
++.mic-actions .status { margin: 0; color: var(--muted); font-size: 14px; }
++#mic-level { width: 120px; accent-color: var(--good); }
+ 
+ .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+ 
+diff --git a/port/web/src/web_library.js b/port/web/src/web_library.js
+index 9425c041..14beb61b 100644
+--- a/port/web/src/web_library.js
++++ b/port/web/src/web_library.js
+@@ -91,6 +91,71 @@ addToLibrary({
+     entry.socket.close();
+   },
+ 
++  // Kevin's companion link: one reconnecting page-thread WebSocket carrying
++  // the exact framed byte stream used by mate_link.c's native TCP socket.
++  $mateSocket: null,
++  $mateReconnectTimer: 0,
++  $mateSentFirst: false,
++  $mateConnect__deps: ['$mateSocket', '$mateReconnectTimer', 'malloc', 'free'],
++  $mateConnect: () => {
++    clearTimeout(mateReconnectTimer);
++    mateReconnectTimer = 0;
++    var url = Module.haloM8URL;
++    if (!/^wss?:\/\/[^\s]+$/i.test(url || '')) return;
++    var socket;
++    var finished = false;
++    var closed = () => {
++      if (finished) return;
++      finished = true;
++      if (mateSocket === socket) mateSocket = null;
++      _mate_link_web_closed();
++      mateReconnectTimer = setTimeout(mateConnect, 2000);
++    };
++    try {
++      socket = new WebSocket(url);
++    } catch (error) {
++      mateReconnectTimer = setTimeout(mateConnect, 2000);
++      return;
++    }
++    mateSocket = socket;
++    socket.binaryType = 'arraybuffer';
++    socket.onopen = () => _mate_link_web_opened();
++    socket.onmessage = (event) => {
++      if (!(event.data instanceof ArrayBuffer) || !event.data.byteLength) return;
++      var bytes = new Uint8Array(event.data);
++      var copy = _malloc(bytes.length);
++      if (!copy) return;
++      HEAPU8.set(bytes, copy);
++      _mate_link_web_data(copy, bytes.length);
++      _free(copy);
++    };
++    socket.onclose = closed;
++    socket.onerror = closed;
++  },
++  web_js_mate_open__proxy: 'async',
++  web_js_mate_open__deps: ['$mateConnect', '$mateSocket'],
++  web_js_mate_open: () => {
++    Module.haloSetM8URL = (url) => {
++      Module.haloM8URL = url;
++      if (mateSocket) mateSocket.close();
++      else mateConnect();
++    };
++    mateConnect();
++  },
++  web_js_mate_send__proxy: 'async',
++  web_js_mate_send__deps: ['$mateSocket', '$mateSentFirst', 'free'],
++  web_js_mate_send: (bytes, size) => {
++    var copy = HEAPU8.slice(bytes, bytes + size);
++    _free(bytes);
++    if (mateSocket && mateSocket.readyState === WebSocket.OPEN) {
++      mateSocket.send(copy);
++      if (!mateSentFirst) {
++        mateSentFirst = true;
++        console.log('m8: sent the first game frame');
++      }
++    }
++  },
++
+   // internet play's WebRTC connections (port/web/src/web_p2p.c), which the
+   // page makes (port/web/site/p2p.js, Module.haloP2P): a command, the
+   // connection, and a copy of its text or packet, freed here
+diff --git a/tools/web_serve.py b/tools/web_serve.py
+index 3c1fdba7..12f001a4 100644
+--- a/tools/web_serve.py
++++ b/tools/web_serve.py
+@@ -108,8 +108,10 @@ class SiteHandler(SimpleHTTPRequestHandler):
+ 
+ 
+ def main(argv=None) -> int:
++    packaged = Path(__file__).resolve().parent
++    default_root = packaged if (packaged / "index.html").is_file() else ROOT / "build/web/site"
+     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+-    parser.add_argument("root", nargs="?", type=Path, default=ROOT / "build/web/site", help="the site's folder")
++    parser.add_argument("root", nargs="?", type=Path, default=default_root, help="the site's folder")
+     parser.add_argument("--bind", default="127.0.0.1")
+     parser.add_argument("--port", type=int, default=8000)
+     parser.add_argument("--as-github-pages", action="store_true",
