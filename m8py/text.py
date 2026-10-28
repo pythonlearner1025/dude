@@ -24,6 +24,40 @@ SOUNDS = {
     **{x: "(clears throat)" for x in ("clears throat", "clears his throat", "clearing throat")},
 }
 
+DELIVERY_WORDS = {
+    "yelling",
+    "shouting",
+    "whispering",
+    "low",
+    "quiet",
+    "loud",
+    "gruff",
+    "smug",
+    "mocking",
+    "annoyed",
+    "angry",
+    "calm",
+    "cold",
+    "sarcastic",
+    "laughing",
+    "sighing",
+    "grunting",
+    "growling",
+    "snarling",
+    "barking",
+    "panting",
+    "breathless",
+    "tired",
+    "cheerful",
+    "confident",
+    "dry",
+}
+
+
+def delivery_note(note: str) -> str:
+    words = {word.strip(".,:;!?()\"'").lower() for word in note.split()}
+    return note if words & DELIVERY_WORDS else ""
+
 
 def clean(text: str) -> str:
     depth = 0

@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 import m8py.brain as brainmod
-from m8py.brain import Brain, Event, Heard, Memory, Summary
+from m8py.brain import Brain, Event, Heard, Memory, Summary, joint_options
 from m8py.speak import EndJob, SentenceJob
 from m8py.speaking import Speaking
 from m8py.trace import Trace
@@ -62,7 +62,9 @@ async def test_prompt_window_situation_and_messages(cfg, tmp_path):
         < prompt.index("John: newest question")
     )
     messages = b.messages()
-    assert messages[0] == {"role": "system", "content": "You are Kevin beside John in Halo."}
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"].startswith("You are Kevin beside John in Halo.")
+    assert "may only describe what he is actually doing" in messages[0]["content"]
     assert messages[-1]["role"] == "user" and messages[-1]["content"].endswith(
         "John: newest question"
     )
@@ -86,19 +88,22 @@ async def test_role_merging(cfg, tmp_path):
 
 @pytest.mark.asyncio
 async def test_decide_do_which_then_speak_and_player_skip(cfg, tmp_path, capsys):
-    purposes = []
+    questions = []
 
     def handler(req):
         body = json.loads(req.content)
-        key = next(iter(body["questions"]))
-        purposes.append(key)
-        if key == "speak":
-            ans = {"speak": {"noul": 0.7}}
-        elif key == "which":
-            ans = {"which": {"choice": next(iter(body["questions"][key]["criteria"]))}}
+        questions.append(list(body["questions"]))
+        if "which" in body["questions"]:
+            ans = {
+                "which": {"choice": next(iter(body["questions"]["which"]["criteria"]))}
+            }
         else:
-            choices = list(body["questions"][key]["criteria"])
-            ans = {"do": {"choice": next(x for x in choices if x != "nothing")}}
+            choices = list(body["questions"]["do"]["criteria"])
+            ans = {
+                "do": {"choice": next(x for x in choices if x != "nothing")},
+                "speak": {"noul": 0.7},
+                "is_command": {"noul": 0.0},
+            }
         return httpx.Response(200, json={"answers": ans, "timings": {"prompt_n": 1}})
 
     b, link, trace, client = make(cfg, tmp_path, handler)
@@ -112,15 +117,32 @@ async def test_decide_do_which_then_speak_and_player_skip(cfg, tmp_path, capsys)
     ]
     span = trace.new_span("event")
     assert await b.decide(False, False, span) is True
-    assert purposes == ["do", "which", "do", "speak"]
+    assert questions == [["do", "speak"], ["do"]]
     assert [x["action"] for x in link.sent] == ["shoot", "reload"]
-    purposes.clear()
+    questions.clear()
     span = trace.new_span("heard")
     assert await b.decide(True, False, span) is True
-    assert "speak" not in purposes
+    assert questions[0] == ["do", "speak", "is_command"]
     assert "[kev]" in capsys.readouterr().out
     await client.aclose()
     await trace.close()
+
+
+def test_joint_options_inline_small_target_sets_only():
+    actions = [
+        {"name": "follow", "description": "follows Chief"},
+        {"name": "shoot", "description": "shoots", "options": {"1": "grunt", "2": "elite"}},
+        {
+            "name": "many",
+            "description": "chooses",
+            "options": {str(i): f"target {i}" for i in range(9)},
+        },
+    ]
+    criteria, decoded = joint_options("Kevin", actions)
+    assert criteria["nothing"] == "Kevin carries on as he is"
+    assert criteria["shoot: 2"] == "Kevin shoots: elite"
+    assert decoded["shoot: 2"] == ("shoot", "2")
+    assert "many: 0" not in criteria and decoded["many"] == ("many", None)
 
 
 @pytest.mark.asyncio
@@ -237,6 +259,43 @@ async def test_say_accepts_usage_chunk_without_choices(cfg, tmp_path, capsys):
     assert isinstance(await b.speech.get(), SentenceJob)
     assert isinstance(await b.speech.get(), EndJob)
     assert "[llm]" in capsys.readouterr().out
+    await client.aclose()
+    await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_voice_cancels_and_resumes_reflect(cfg, tmp_path):
+    reflect_started = asyncio.Event()
+    reflect_calls = 0
+
+    async def handler(request):
+        nonlocal reflect_calls
+        body = json.loads(request.content)
+        if body.get("id_slot") == 1:
+            reflect_calls += 1
+            if reflect_calls == 1:
+                reflect_started.set()
+                await asyncio.Event().wait()
+            content = json.dumps({"orders": ["Stay close"], "remember": ["John trusts Kevin"]})
+            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+        stream = (
+            'data: {"choices":[{"delta":{"content":"Copy."}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+
+    b, _, trace, client = make(cfg, tmp_path, handler)
+    b._request_reflect("test command")
+    await reflect_started.wait()
+
+    await b.say(trace.new_span("heard"))
+    await b.reflect_task
+
+    entries = [entry["data"] for entry in trace.entries if entry["kind"] == "reflect"]
+    assert reflect_calls == 2
+    assert [entry["interrupted"] for entry in entries] == [True, False]
+    assert b.memory.orders == ["Stay close"]
+    assert b.memory.remember == ["John trusts Kevin"]
     await client.aclose()
     await trace.close()
 

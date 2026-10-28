@@ -14,11 +14,13 @@ from .link import GameLink
 from .picture import base64, mark, png
 from .speak import EndJob, SentenceJob
 from .speaking import Speaking
-from .text import Notes, PieceKind, SentenceSplitter, clean
+from .text import Notes, PieceKind, SentenceSplitter, clean, delivery_note
 from .trace import Span, Trace, now_ms
+from .validator import ActionStatus, Validator
 
 FEED_TOKENS, FEED_FOLDED_TO, FEED_MAX_TOKENS = 16_000, 12_000, 20_000
 QUIET, QUIET_EVENT, KEV_FEED_LINES, SAVES = 45.0, "It's been quiet for a while.", 20, 50
+REFLECT_INTERVAL, REFLECT_LOG_TOKENS, REFLECT_MAX_TOKENS = 15.0, 7_000, 512
 
 
 @dataclass(slots=True)
@@ -60,10 +62,31 @@ class Summary:
 Input = Heard | Event | Saved | Loaded | NewGame | Summary
 
 
+def joint_options(
+    name: str, actions: list[dict[str, Any]], fill: Any = lambda value: value
+) -> tuple[dict[str, str], dict[str, tuple[str, str | None]]]:
+    criteria = {"nothing": f"{name} carries on as he is"}
+    choices: dict[str, tuple[str, str | None]] = {"nothing": ("nothing", None)}
+    for action in actions:
+        action_name = str(action.get("name", ""))
+        description = fill(str(action.get("description", "")))
+        targets = action.get("options") or {}
+        if targets and len(targets) <= 8:
+            for option, label in targets.items():
+                key = f"{action_name}: {option}"
+                criteria[key] = f"{name} {description}: {label}"
+                choices[key] = (action_name, str(option))
+        criteria[action_name] = f"{name} {description}"
+        choices[action_name] = (action_name, None)
+    return criteria, choices
+
+
 @dataclass(slots=True)
 class Memory:
     summary: str = ""
     feed: list[str] = field(default_factory=list)
+    orders: list[str] = field(default_factory=list)
+    remember: list[str] = field(default_factory=list)
 
 
 class PromptFile:
@@ -115,6 +138,15 @@ class Brain:
         except (OSError, ValueError, TypeError):
             self.saves = []
         self._last_input = time.monotonic()
+        self.reflect_log: list[str] = []
+        self.reflect_task: asyncio.Task[None] | None = None
+        self.reflect_pending = False
+        self._last_reflect = time.monotonic()
+        self.validator = Validator(
+            self.link.send_json, self._validator_changed, self._validator_failed
+        )
+        if hasattr(self.link, "add_state_observer"):
+            self.link.add_state_observer(self._on_state)
 
     @property
     def saves_path(self) -> Path:
@@ -148,11 +180,32 @@ class Brain:
             out.append(f"What {self.cfg.mate.name} remembers: {self.memory.summary}")
         return out
 
+    def orders_text(self) -> str:
+        return "Orders:\n" + ("\n".join(f"- {x}" for x in self.memory.orders) or "- none")
+
+    def remembers_text(self) -> str:
+        return "Kevin remembers:\n" + (
+            "\n".join(f"- {x}" for x in self.memory.remember) or "- nothing"
+        )
+
+    def doing_text(self) -> str:
+        current = self.validator.current
+        if not current:
+            return "Kevin is doing: nothing (done)"
+        return f"Kevin is doing: {current.display()} ({current.status})"
+
     def right_now(self) -> str:
         return f"Right now: {self.fill(str(self.state().get('state', 'unknown')))}"
 
     def system(self) -> str:
         return self.fill(self.system_file.get().strip())
+
+    def voice_system(self) -> str:
+        return (
+            self.system()
+            + "\n\nRuntime rule: Kevin may only describe what he is actually doing according to "
+            "the final 'Kevin is doing' line. Never claim he is doing any other action."
+        )
 
     def situation(self) -> str:
         parts = []
@@ -177,7 +230,7 @@ class Brain:
     def prompt(self) -> str:
         start = max(0, len(self.memory.feed) - KEV_FEED_LINES)
         newest = max(self.newest(), start)
-        parts = [self.system(), *self.context()]
+        parts = [self.system(), *self.context(), self.orders_text(), self.remembers_text()]
         if newest > start:
             parts.append("\n".join(self.memory.feed[start:newest]))
         parts.append(self.situation())
@@ -186,7 +239,7 @@ class Brain:
         return "\n\n".join(parts)
 
     def messages(self) -> list[dict[str, str]]:
-        turns: list[list[str]] = [["system", self.system()]]
+        turns: list[list[str]] = [["system", self.voice_system()]]
 
         def add(role: str, text: str) -> None:
             if turns[-1][0] == role:
@@ -201,9 +254,14 @@ class Brain:
         newest = self.newest()
         for line in self.memory.feed[:newest]:
             add("assistant", line[len(own) :]) if line.startswith(own) else add("user", line)
-        add("user", self.situation())
-        for line in self.memory.feed[newest:]:
-            add("user", line)
+        volatile = [
+            self.orders_text(),
+            self.remembers_text(),
+            self.doing_text(),
+            self.situation(),
+            *self.memory.feed[newest:],
+        ]
+        turns.append(["user", "\n\n".join(volatile)])
         self.trace.set_prompt("\n\n".join(f"[{r}]\n{t}" for r, t in turns))
         return [{"role": r, "content": t} for r, t in turns]
 
@@ -247,11 +305,13 @@ class Brain:
             except Exception as exc:
                 print(f"[brain] error: {exc}")
             self.fold_over(FEED_TOKENS if quiet else FEED_MAX_TOKENS)
+            self._reflect_heartbeat()
 
     async def on_heard(self, item: Heard) -> None:
         span = self.trace.new_span("heard", item.turn_id, **item.timing)
         await self.link.send_json({"type": "heard", "text": item.text})
         self.memory.feed.append(f"{self.player()}: {item.text}")
+        self._reflect_log(f"{self.player()}: {item.text}")
         self.trace.add("heard", {"text": item.text})
         await self.respond(True, span)
 
@@ -260,6 +320,8 @@ class Brain:
         for event in events:
             text = self.fill(event.text)
             self.memory.feed.append(text)
+            self._reflect_log(text)
+            self.validator.on_event(text)
             self.trace.add("event", {"text": text, "react": event.react, "state": self.state()})
         if any(e.react for e in events):
             await self.respond(False, span)
@@ -285,6 +347,127 @@ class Brain:
         finally:
             if not speech_finishes:
                 span.finish()
+
+    def _on_state(self, state: dict[str, Any]) -> None:
+        self.validator.update(state)
+        self._reflect_heartbeat()
+
+    def _validator_changed(self, current: ActionStatus) -> None:
+        data = {
+            "action": current.action,
+            "option": current.option,
+            "label": current.label,
+            "status": current.status,
+        }
+        self.trace.add("validator", data)
+        self._reflect_log(
+            f"Kevin action: {current.display()} — {current.status}."
+        )
+
+    def _validator_failed(self, current: ActionStatus) -> None:
+        self._request_reflect(f"{current.display()} failed or made no progress")
+
+    def _reflect_log(self, line: str) -> None:
+        self.reflect_log.append(line)
+        if self.feed_tokens(self.reflect_log) > REFLECT_LOG_TOKENS:
+            self.reflect_log = self.reflect_log[len(self.reflect_log) // 2 :]
+
+    def _reflect_heartbeat(self) -> None:
+        if self.memory.orders and time.monotonic() - self._last_reflect >= REFLECT_INTERVAL:
+            self._request_reflect("orders heartbeat")
+
+    def _request_reflect(self, reason: str) -> None:
+        if self.reflect_task and not self.reflect_task.done():
+            self.reflect_pending = True
+            return
+        self.reflect_task = asyncio.create_task(self._reflect(reason))
+
+    async def _reflect(self, reason: str) -> None:
+        self._last_reflect = time.monotonic()
+        started = time.monotonic()
+        request: dict[str, Any] = {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Maintain Kevin's durable orders and relationship memory. Review actual "
+                        "events and outcomes. Never send or propose a game action. Output JSON "
+                        "only "
+                        "with exactly: orders (the full replacement list of short imperative "
+                        "strings) and remember (new facts about the player or relationship)."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Reason: {reason}\n\n{self.orders_text()}\n\n{self.remembers_text()}"
+                        f"\n\nSummary:\n{self.memory.summary or 'none'}\n\n"
+                        "Append-only log (newest last):\n"
+                        + ("\n".join(self.reflect_log) or "none")
+                        + f"\n\nCurrent state:\n{self.right_now()}\n\nDecide."
+                    ),
+                },
+            ],
+            "temperature": 0.3,
+            "stream": False,
+            "max_tokens": REFLECT_MAX_TOKENS,
+            "id_slot": 1,
+            "chat_template_kwargs": {"enable_thinking": True},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "reflection",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "orders": {"type": "array", "items": {"type": "string"}},
+                            "remember": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["orders", "remember"],
+                    },
+                },
+            },
+        }
+        output = ""
+        error = None
+        interrupted = False
+        try:
+            response = await self.client.post(self.cfg.llm.url, json=request)
+            response.raise_for_status()
+            body = response.json()
+            output = str(body.get("choices", [{}])[0].get("message", {}).get("content", ""))
+            result = json.loads(output)
+            orders = [str(x).strip() for x in result.get("orders", []) if str(x).strip()]
+            remember = [str(x).strip() for x in result.get("remember", []) if str(x).strip()]
+            if orders != self.memory.orders:
+                self.memory.orders = orders
+                self.trace.add("orders", {"orders": orders, "reason": reason})
+            for fact in remember:
+                if fact not in self.memory.remember:
+                    self.memory.remember.append(fact)
+        except asyncio.CancelledError:
+            interrupted = True
+            raise
+        except Exception as exc:
+            error = str(exc)
+        finally:
+            self.trace.add(
+                "reflect",
+                {
+                    "request": request,
+                    "output": output,
+                    "ms": round((time.monotonic() - started) * 1000),
+                    "interrupted": interrupted,
+                    "error": error,
+                },
+            )
+            if self.reflect_task is asyncio.current_task():
+                self.reflect_task = None
+            if not interrupted and self.reflect_pending:
+                self.reflect_pending = False
+                asyncio.get_running_loop().call_soon(
+                    self._request_reflect, "triggered while reflection was running"
+                )
 
     async def kev(
         self,
@@ -333,18 +516,36 @@ class Brain:
         started = time.monotonic()
         calls = []
         actions = self.state().get("actions", [])
-        done = await self.act("do", actions, calls, span)
+        criteria, _ = joint_options(self.cfg.mate.name, actions, self.fill)
+        questions: dict[str, Any] = {
+            "do": {
+                "type": "choice",
+                "instructions": f"Which of these does {self.cfg.mate.name} do now?",
+                "criteria": criteria,
+            }
+        }
+        ask_speak = to_player or not cooldown
+        if ask_speak:
+            questions["speak"] = {
+                "type": "noul",
+                "instructions": f"Should {self.cfg.mate.name} speak now?",
+            }
+        if to_player:
+            questions["is_command"] = {
+                "type": "noul",
+                "instructions": "Is the player's newest line asking Kevin to do something?",
+            }
+        answers = await self.kev("do", self.prompt(), questions, calls, span)
+        done = await self.act("do", actions, calls, span, answers)
         chosen = next((a for a in actions if a.get("name") == done.get("action")), {})
         then = chosen.get("then") or []
         then_done = await self.act("then", then, calls, span) if then else None
-        ask = not to_player and not cooldown
-        speak = to_player
-        if ask:
-            q = {
-                "speak": {"type": "noul", "instructions": f"Should {self.cfg.mate.name} speak now?"}
-            }
-            answer = await self.kev("speak", self.prompt(), q, calls, span)
-            speak = float(answer.get("speak", {}).get("noul", 0)) >= 0.5
+        speak = ask_speak and float(answers.get("speak", {}).get("noul", 0)) >= 0.5
+        is_command = to_player and float(
+            answers.get("is_command", {}).get("noul", 0)
+        ) >= 0.5
+        if is_command:
+            self._request_reflect("the player's newest line is a command")
         data = {
             "calls": calls,
             "action": done.get("action"),
@@ -353,7 +554,8 @@ class Brain:
             "seen": done.get("seen"),
             "then": then_done,
             "speak": speak,
-            "speak_asked": ask,
+            "speak_asked": ask_speak,
+            "is_command": is_command,
             "cooldown": cooldown,
             "ms": round((time.monotonic() - started) * 1000),
         }
@@ -373,33 +575,37 @@ class Brain:
         return speak
 
     async def act(
-        self, purpose: str, actions: list[dict[str, Any]], calls: list[dict[str, Any]], span: Span
+        self,
+        purpose: str,
+        actions: list[dict[str, Any]],
+        calls: list[dict[str, Any]],
+        span: Span,
+        answers: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         name = self.cfg.mate.name
-        options = {"nothing": f"{name} carries on as he is"}
-        options.update(
-            {
-                str(a.get("name", "")): f"{name} {self.fill(str(a.get('description', '')))}"
-                for a in actions
-            }
-        )
+        options, choices = joint_options(name, actions, self.fill)
         prompt = self.prompt()
-        q = {
-            "do": {
-                "type": "choice",
-                "instructions": f"Which of these does {name} do now?",
-                "criteria": options,
+        if answers is None:
+            q = {
+                "do": {
+                    "type": "choice",
+                    "instructions": f"Which of these does {name} do now?",
+                    "criteria": options,
+                }
             }
-        }
-        answer = await self.kev(purpose, prompt, q, calls, span)
-        action = str(answer.get("do", {}).get("choice", "nothing"))
+            answers = await self.kev(purpose, prompt, q, calls, span)
+        choice = str(answers.get("do", {}).get("choice", "nothing"))
+        action, option = choices.get(choice, ("nothing", None))
         if action == "nothing":
             return {"action": action}
         chosen = next((a for a in actions if a.get("name") == action), {})
-        msg = {"type": "action", "action": action}
+        msg: dict[str, Any] = {"type": "action", "action": action}
         line = options.get(action, "")
         targets = chosen.get("options") or {}
-        if targets:
+        if option is not None:
+            msg["option"] = option
+            line = f"{name} {self.fill(str(chosen.get('description', '')))}: {targets[option]}"
+        elif len(targets) > 8:
             q = {
                 "which": {
                     "type": "choice",
@@ -419,7 +625,12 @@ class Brain:
             line += f": {what}"
             seen = {"what": what, "picture": picture}
         else:
-            await self.link.send_json(msg)
+            await self.validator.send(
+                self.state(),
+                action,
+                msg.get("option"),
+                label=str(targets.get(msg.get("option"), "")),
+            )
             if "result" in chosen:
                 line += f": {self.fill(str(chosen['result']))}"
         self.memory.feed.append(line + ".")
@@ -480,6 +691,8 @@ class Brain:
             ],
             "temperature": self.cfg.llm.temperature,
             "stream": False,
+            "id_slot": 1,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if choose:
             spots = [0, *[int(s["id"]) for s in view.spots if isinstance(s.get("id"), int)]]
@@ -512,7 +725,12 @@ class Brain:
                 found = next((s for s in view.spots if spot > 0 and s.get("id") == spot), None)
                 if found:
                     msg["option"] = str(spot)
-                    await self.link.send_json(msg)
+                    await self.validator.send(
+                        self.state(),
+                        str(msg.get("action", "")),
+                        str(spot),
+                        label=str(answer.get("place", "")),
+                    )
                     what = (
                         f"{str(answer.get('place', 'there')).strip()} ({found.get('metres')} m off)"
                     )
@@ -520,6 +738,7 @@ class Brain:
                     what = "none that fits"
             else:
                 what = clean(output)
+                await self.validator.send(self.state(), str(msg.get("action", "")))
         except Exception as exc:
             span.set_error("vision", exc)
             print(f"[sight] {kind}: error {exc}", flush=True)
@@ -556,7 +775,14 @@ class Brain:
     async def say(self, span: Span) -> bool:
         name = self.cfg.mate.name
         messages = self.messages()
-        request = {"messages": messages, "temperature": self.cfg.llm.temperature, "stream": True}
+        request = {
+            "messages": messages,
+            "temperature": self.cfg.llm.temperature,
+            "stream": True,
+            "id_slot": 0,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        resume_reflect = await self._interrupt_reflect_for_voice()
         generation = self.speaking.generation
         started = time.monotonic()
         span.mark("llm_request")
@@ -604,8 +830,9 @@ class Brain:
                         else:
                             if rest := splitter.finish():
                                 await self._sentence(rest, how, generation, span)
-                            how = piece.value
-                            directions.append(how)
+                            how = delivery_note(piece.value)
+                            if how:
+                                directions.append(how)
         except Exception as exc:
             error = str(exc)
             span.set_error("llm", exc)
@@ -617,6 +844,7 @@ class Brain:
         line = full.strip()
         if streaming_started:
             self.memory.feed.append(f"{name}: {line}")
+            self._reflect_log(f"{name}: {line}")
         self.trace.add(
             "llm",
             {
@@ -634,7 +862,18 @@ class Brain:
         )
         total = round((time.monotonic() - started) * 1000)
         print(f'[llm] {name}: "{line}" (first {first} ms, total {total} ms)', flush=True)
+        if resume_reflect:
+            self._request_reflect("resume after voice")
         return streaming_started
+
+    async def _interrupt_reflect_for_voice(self) -> bool:
+        task = self.reflect_task
+        if not task or task.done():
+            return False
+        self.reflect_pending = False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return True
 
     async def _sentence(self, text: str, how: str, generation: int, span: Span) -> None:
         text = text.strip()
@@ -645,19 +884,54 @@ class Brain:
 
     async def on_saved(self, ident: str) -> None:
         self.saves = [x for x in self.saves if x[0] != ident]
-        self.saves.append((ident, Memory(self.memory.summary, self.memory.feed.copy())))
+        self.saves.append(
+            (
+                ident,
+                Memory(
+                    self.memory.summary,
+                    self.memory.feed.copy(),
+                    self.memory.orders.copy(),
+                    self.memory.remember.copy(),
+                ),
+            )
+        )
         self.saves = self.saves[-SAVES:]
         self.saves_path.write_text(
-            json.dumps([[i, {"summary": m.summary, "feed": m.feed}] for i, m in self.saves])
+            json.dumps(
+                [
+                    [
+                        i,
+                        {
+                            "summary": m.summary,
+                            "feed": m.feed,
+                            "orders": m.orders,
+                            "remember": m.remember,
+                        },
+                    ]
+                    for i, m in self.saves
+                ]
+            )
         )
         self.trace.add("event", {"text": f"(the game saved: {ident})"})
         self.fold_over(FEED_TOKENS)
 
     async def on_loaded(self, ident: str) -> None:
+        await self._cancel_reflect()
         found = next((m for i, m in reversed(self.saves) if i == ident), None)
-        self.memory = Memory(found.summary, found.feed.copy()) if found else Memory()
+        self.memory = (
+            Memory(
+                found.summary,
+                found.feed.copy(),
+                found.orders.copy(),
+                found.remember.copy(),
+            )
+            if found
+            else Memory()
+        )
         self.memory_generation += 1
         self.summarizing = False
+        self.reflect_log = []
+        self.validator.current = None
         if self.speaking.is_speaking():
             self.speaking.interrupt()
             await self.link.send_json({"type": "stop_audio"})
@@ -665,14 +939,24 @@ class Brain:
         self.trace.add("event", {"text": f"(the game loaded {ident}: {note})"})
 
     async def on_new_game(self, level: str) -> None:
+        await self._cancel_reflect()
         self.memory = Memory()
         self.saves = []
         self.saves_path.write_text("[]")
         self.memory_generation += 1
         self.summarizing = False
+        self.reflect_log = []
+        self.validator.current = None
         self.speaking.interrupt()
         await self.link.send_json({"type": "stop_audio"})
         self.trace.add("event", {"text": f"(new game: {level}, memory reset)"})
+
+    async def _cancel_reflect(self) -> None:
+        self.reflect_pending = False
+        task = self.reflect_task
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     def on_summary(self, item: Summary) -> None:
         self.summarizing = False
@@ -722,7 +1006,13 @@ class Brain:
         model = None
         try:
             response = await self.client.post(
-                self.cfg.llm.url, json={"messages": messages, "temperature": 0.3}
+                self.cfg.llm.url,
+                json={
+                    "messages": messages,
+                    "temperature": 0.3,
+                    "id_slot": 1,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
             )
             response.raise_for_status()
             body = response.json()
