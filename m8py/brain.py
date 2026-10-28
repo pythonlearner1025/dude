@@ -14,7 +14,7 @@ from .link import GameLink
 from .picture import base64, mark, png
 from .speak import EndJob, SentenceJob
 from .speaking import Speaking
-from .text import Notes, PieceKind, SentenceSplitter, clean, delivery_note
+from .text import Notes, PieceKind, SentenceSplitter, clean, delivery_note, is_noise
 from .trace import Span, Trace, now_ms
 from .validator import ActionStatus, Validator
 
@@ -316,7 +316,8 @@ class Brain:
         self.memory.feed.append(f"{self.player()}: {item.text}")
         self._reflect_log(f"{self.player()}: {item.text}")
         self.trace.add("heard", {"text": item.text})
-        await self.respond(True, span)
+        # Spoken lines only: typed lines have no turn id and often no punctuation.
+        await self.respond(True, span, noise=item.turn_id is not None and is_noise(item.text))
 
     async def on_events(self, events: list[Event], quiet: bool = False) -> None:
         span = self.trace.new_span("quiet" if quiet else "event", **events[0].timing)
@@ -332,7 +333,7 @@ class Brain:
             span.set(spoke=False)
             span.finish()
 
-    async def respond(self, to_player: bool, span: Span) -> None:
+    async def respond(self, to_player: bool, span: Span, noise: bool = False) -> None:
         speech_finishes = False
         try:
             q = self.speaking.quiet_from()
@@ -340,7 +341,7 @@ class Brain:
                 q is None or time.monotonic() < q + self.link.speech_cooldown
             )
             span.mark("kev_start")
-            speak = await self.decide(to_player, cooldown, span)
+            speak = await self.decide(to_player, cooldown, span, noise)
             span.mark("kev_done")
             span.set(spoke=speak)
             if speak:
@@ -520,7 +521,9 @@ class Brain:
             span.data.setdefault("usage", {})[purpose] = usage
         return body.get("answers", {})
 
-    async def decide(self, to_player: bool, cooldown: bool, span: Span) -> bool:
+    async def decide(
+        self, to_player: bool, cooldown: bool, span: Span, noise: bool = False
+    ) -> bool:
         started = time.monotonic()
         calls = []
         actions = self.state().get("actions", [])
@@ -532,7 +535,9 @@ class Brain:
                 "criteria": criteria,
             }
         }
-        ask_speak = to_player or not cooldown
+        # The player's lines are answered unless they are noise; Kev scored real questions
+        # ("what's your favorite color?") below 0.5 and answered only 45 of 108 real lines.
+        ask_speak = not to_player and not cooldown
         if ask_speak:
             questions["speak"] = {
                 "type": "noul",
@@ -548,7 +553,10 @@ class Brain:
         chosen = next((a for a in actions if a.get("name") == done.get("action")), {})
         then = chosen.get("then") or []
         then_done = await self.act("then", then, calls, span) if then else None
-        speak = ask_speak and float(answers.get("speak", {}).get("noul", 0)) >= 0.5
+        if to_player:
+            speak = not noise
+        else:
+            speak = ask_speak and float(answers.get("speak", {}).get("noul", 0)) >= 0.5
         is_command = to_player and float(
             answers.get("is_command", {}).get("noul", 0)
         ) >= 0.5
@@ -563,6 +571,7 @@ class Brain:
             "then": then_done,
             "speak": speak,
             "speak_asked": ask_speak,
+            "noise": noise,
             "is_command": is_command,
             "cooldown": cooldown,
             "ms": round((time.monotonic() - started) * 1000),
@@ -573,7 +582,8 @@ class Brain:
             chain += f" {done['option']}"
         if then_done:
             chain += f" -> {then_done.get('action', 'nothing')}"
-        speak_note = "cooldown" if cooldown else ("speak" if speak else "quiet")
+        speak_note = "speak" if speak else ("noise" if noise else "quiet")
+        speak_note = "cooldown" if cooldown else speak_note
         print(f"[kev] {chain}; {speak_note} ({data['ms']} ms)", flush=True)
         span.set(
             action=done.get("action"),

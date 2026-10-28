@@ -122,7 +122,8 @@ async def test_decide_do_which_then_speak_and_player_skip(cfg, tmp_path, capsys)
     questions.clear()
     span = trace.new_span("heard")
     assert await b.decide(True, False, span) is True
-    assert questions[0] == ["do", "speak", "is_command"]
+    assert questions[0] == ["do", "is_command"]
+    assert await b.decide(True, False, trace.new_span("heard"), noise=True) is False
     assert "[kev]" in capsys.readouterr().out
     await client.aclose()
     await trace.close()

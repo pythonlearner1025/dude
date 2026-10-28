@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -152,3 +153,16 @@ class SentenceSplitter:
         rest = clean(self.buf)
         self.buf = ""
         return rest or None
+
+
+FILLER_WORDS = frozenset(
+    "uh um mm hmm mmhmm huh oh like yeah yes yep okay ok right so and but well then sure great "
+    "alright".split()
+)
+
+
+def is_noise(heard: str) -> bool:
+    """Filler or a cut-off fragment. Parakeet ends complete utterances with . ? or !"""
+    if not re.search(r"[.?!]\W*$", heard.strip()):
+        return True
+    return all(word in FILLER_WORDS for word in re.sub(r"[^\w\s]", "", heard.lower()).split())

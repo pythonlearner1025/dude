@@ -1,6 +1,14 @@
 import pytest
 
-from m8py.text import Notes, Piece, PieceKind, SentenceSplitter, clean, delivery_note
+from m8py.text import (
+    Notes,
+    Piece,
+    PieceKind,
+    SentenceSplitter,
+    clean,
+    delivery_note,
+    is_noise,
+)
 
 
 @pytest.mark.parametrize(
@@ -82,3 +90,11 @@ def test_note_causes_mid_sentence_flush():
 )
 def test_delivery_note_allowlist(note, expected):
     assert delivery_note(note) == expected
+
+
+def test_is_noise_drops_filler_and_cut_off_fragments():
+    noise = ["Uh", "Yeah.", "Okay.", "Mm-hmm.", "At the", "Careful I", "Can you look at the l log of"]
+    for line in noise:
+        assert is_noise(line), line
+    for line in ["What is your favorite colour?", "Go, go, go.", "Hey Kevin.", "Hold your fire."]:
+        assert not is_noise(line), line
