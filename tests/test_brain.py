@@ -275,6 +275,33 @@ async def test_saves_loaded_and_generation_guard(cfg, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_new_game_clears_all_memory_saves_and_speech(cfg, tmp_path):
+    b, link, trace, client = make(cfg, tmp_path)
+    b.memory = Memory("old summary", ["old feed"])
+    await b.on_saved("a10:30")
+    b.memory.feed.append("after checkpoint")
+    b.summarizing = True
+    old_generation = b.memory_generation
+    b.speaking.begin_line()
+
+    await b.on_new_game("b30")
+
+    assert b.memory == Memory()
+    assert b.saves == []
+    assert json.loads(b.saves_path.read_text()) == []
+    assert b.memory_generation == old_generation + 1
+    assert not b.summarizing
+    assert b.speaking.generation == 1
+    assert link.sent[-1] == {"type": "stop_audio"}
+    assert trace.entries[-1]["data"]["text"] == "(new game: b30, memory reset)"
+
+    b.on_summary(Summary(old_generation, 1, "stale"))
+    assert b.memory == Memory()
+    await client.aclose()
+    await trace.close()
+
+
+@pytest.mark.asyncio
 async def test_event_batching_holds_non_event(cfg, tmp_path, monkeypatch):
     b, _, trace, client = make(cfg, tmp_path)
     seen = []

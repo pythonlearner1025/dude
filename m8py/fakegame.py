@@ -325,6 +325,8 @@ class FakeGame:
             await self.send_json(msg)
         elif kind in {"saved", "loaded"}:
             await self.send_json({"type": kind, "id": step["id"]})
+        elif kind == "new_game":
+            await self.send_json({"type": kind, "level": step["level"]})
         elif kind in {"direct", "mic"}:
             msg = {"type": kind, **{k: v for k, v in step.items() if k not in {"at", "kind"}}}
             await self.send_json(msg)

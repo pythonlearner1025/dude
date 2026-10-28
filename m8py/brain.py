@@ -46,13 +46,18 @@ class Loaded:
 
 
 @dataclass(slots=True)
+class NewGame:
+    level: str
+
+
+@dataclass(slots=True)
 class Summary:
     memory_generation: int
     folded: int
     text: str
 
 
-Input = Heard | Event | Saved | Loaded | Summary
+Input = Heard | Event | Saved | Loaded | NewGame | Summary
 
 
 @dataclass(slots=True)
@@ -235,6 +240,8 @@ class Brain:
                     await self.on_saved(item.ident)
                 elif isinstance(item, Loaded):
                     await self.on_loaded(item.ident)
+                elif isinstance(item, NewGame):
+                    await self.on_new_game(item.level)
                 else:
                     self.on_summary(item)
             except Exception as exc:
@@ -656,6 +663,16 @@ class Brain:
             await self.link.send_json({"type": "stop_audio"})
         note = "memory restored" if found else "a save it never saw: memory cleared"
         self.trace.add("event", {"text": f"(the game loaded {ident}: {note})"})
+
+    async def on_new_game(self, level: str) -> None:
+        self.memory = Memory()
+        self.saves = []
+        self.saves_path.write_text("[]")
+        self.memory_generation += 1
+        self.summarizing = False
+        self.speaking.interrupt()
+        await self.link.send_json({"type": "stop_audio"})
+        self.trace.add("event", {"text": f"(new game: {level}, memory reset)"})
 
     def on_summary(self, item: Summary) -> None:
         self.summarizing = False
