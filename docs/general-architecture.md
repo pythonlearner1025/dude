@@ -230,6 +230,41 @@ model, plus replayed real logs) makes this a regression suite.
 store, executor and dialogue are shared. This is the piece that turns "an NPC that talks" into a
 teammate that takes orders.
 
+
+### 4.8 Alternative considered: three loops (reflex / voice / reflect)
+
+```
+mic (echo-cancelled) → VAD + end-of-turn → streaming STT ─┐
+game: state (2 Hz), events, view frames ──────────────────┤
+                               Router / Director (chat · command · deictic · look · event · plan · memory)
+   (1) REFLEX: one batched decision call {action+target, speak?, is_command, urgency} → action in ~0.2-0.3 s
+   (2) VOICE: LLM slot A, no reasoning, short lines, append-only prompt
+   (3) REFLECT: LLM slot B, reasoning, every few s and after failures: plan, check promises vs outcomes,
+       emit a validated action + feed note
+   + async downscaled vision tool, memory service, Breeze TTS with barge-in
+```
+
+| Need (from the playtests) | Three loops | Directives + executor (§4.7) |
+| --- | --- | --- |
+| Command reaction latency | better: one batched call (~150 ms on Kev) vs m8's 357-476 ms chain | needs an LLM compile step (~0.5-1 s) unless fast-pathed |
+| Voice latency | better: append-only prompt keeps the prefix cache (live first token 510 ms vs 157-181 ms cached on Gemma) | silent on it |
+| Standing orders ("stay ahead") | weak: no durable store; REFLECT must keep re-issuing; no `lead` action exists | stored and enforced every tick |
+| Conditional orders ("hold fire until close") | weak: noticed seconds late at REFLECT cadence | condition checked every tick |
+| Deictic / spatial ("where I'm pointing", "that rock") | vision tool: 0.7-2 s, coarse 8×5 screen grid | aim point + landmarks from the game (instant, metric); vision as fallback |
+| Multi-step tasks | REFLECT plans, but atomic actions have no done/failed; progress inferred from 2 Hz state | executor sequences skills, lifecycle events |
+| Says ≠ does | detects after the fact (promise audit) | prevents (line generated from the chosen program) |
+| Novel, unanticipated instructions | better: open-ended reasoning | limited to predefined skill/rule types |
+| Per-game adapter work | lower: reuses the offered action list | higher: primitives, referents, lifecycle |
+| 24 GB budget | risky: a reasoning cycle (300-800 tokens at ~70 tok/s) keeps slot B busy, slowing voice and TTS on the same GPU; two ~18k prompts overflow the shared 32k KV | compile only on commands; executor on CPU |
+| Debugging / evaluation | behaviour emerges from prompts | typed directives are inspectable and testable |
+
+Reading: the three loops are the better runtime skeleton (multi-rate, latency-aware, auditable),
+but they don't by themselves supply the four things the failures point to: durable orders,
+tick-rate condition checks, spatial referents, and action outcome feedback. A hybrid keeps the
+three loops, has REFLECT write validated typed directives (not one-off actions), and lets a small
+executor enforce them between REFLECT cycles. To be decided by the replay benchmark and the GPU
+contention test (`tools/bench_commands/`), not by argument.
+
 ## 5. The character factory (training infrastructure)
 
 Goal: a new character for a new game in days, improving with every session.
