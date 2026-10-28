@@ -330,3 +330,55 @@ line now counts as noise when it has no closing punctuation or is only filler wo
 "okay"…): 104 of 108 real lines answered (the 4 misses are long off-game sentences split by the
 VAD), 166 of 197 noise lines dropped. Typed lines are always answered; game events still use Kev.
 Reflect now also pauses while a vision call runs on slot 1.
+
+## 10. Fifth playtest: conversation good, instruction following still not (a30, 6 min in game)
+
+Session `1793165250` (19 min; level a30 from 674 s to 1040 s, then the player died and talked
+off-game). Speech end → first audio p50 1.87 s, p90 3.5 s. Conversation quality was good.
+Worked: "Follow me" → `follow`; "move towards me" → `follow`; "clear these guys in front of me" →
+shot and killed a grunt 6 m ahead.
+
+**Mechanical bugs**
+
+1. *Kevin went mute at the end.* After 1070 s the Silero VAD stayed in "speech" for minutes
+   (sherpa-onnx buffer overflow at 60, 120, 240 s): no segment was ever closed, so nothing was
+   transcribed, and `speech_active()` stayed true, so every Kevin line was cut by barge-in.
+   `max_speech_duration = 20` is not a hard cut in sherpa-onnx's Silero VAD; past it the threshold
+   only rises.
+2. *Voice's prompt cache is wiped by every Reflect/vision call.* With a unified KV cache and
+   `--cache-ram`, llama.cpp saves idle slots to the RAM cache and clears them when another slot
+   starts a task. Reproduced: a Voice prompt reused 2,742 tokens (290 ms) on its own, but 0 tokens
+   (1,108 ms) after one Reflect request on slot 1. Most in-game Voice turns had `cache_n = 0` and
+   re-read 2-4k tokens, so first-token time grew from ~250 ms to ~1.6 s as the feed grew
+   (p50 719 ms, p90 1,583 ms).
+3. *Barge-in on any sound.* 26 of 84 spoken sentences were cut. Fragments that the noise filter
+   correctly leaves unanswered ("Yeah.", "Uh") still cut Kevin off.
+4. *A command was classed as noise.* "Kevin, can you move behind that big rock that I'm looking
+   at? And" ends mid-sentence (VAD split), so it got no reply.
+
+**Instruction following**
+
+5. *Kev is choosing almost at random.* Joint action+target choices: median 19 options (max 31),
+   top-choice probability median 0.17, margin over the second choice median 0.03.
+6. *Every utterance re-decides the action, overriding the one in progress.* 11 noise fragments and
+   10 chit-chat lines changed Kevin's action. Asked to move behind the rock, he got `go_aim`, which
+   "Now" replaced with `follow` 2.5 s later. `go_aim` was picked for "Hey Kevin.", "Where was it?",
+   "Thank you. Good job." and similar, so Kevin walked off to where the player was aiming and
+   stopped following.
+7. *Hold fire:* 1 of 4 attempts chose `hold_fire` ("stop shooting", "conserve our ammo",
+   "Hold your fire." → `nothing`, which keeps shooting).
+8. *No action for what was asked.* Offered: cover, crouch, fall_back, flashlight, follow, go_aim,
+   go_to, hold_fire, jump, look, rush, search_vehicles, search_weapons, shoot, shoot_chief, stay,
+   switch_weapon. Nothing means "lead / move ahead", "clear this area", "flank right" or "get behind
+   that". `go_aim` goes to the crosshair point, the face of the rock, not behind it.
+9. *Vision is not used for movement.* "Look at it" → vision correctly saw "a large, dark granite
+   boulder directly in front of him", but none of the five "move behind that rock" lines chose the
+   vision `go_to`; its one use was for "Where are you? I don't see you." (picked "the ground 24 m
+   ahead").
+
+**Memory**
+
+10. *Orders never held a player instruction.* In game, orders were the level objective copied from
+    the "New objective" event ("Evade the Covenant patrols…"). 37 of 47 Reflect runs were
+    interrupted by Voice; completed ones took 7.2 s (median).
+11. Before the level, off-game talk became an order again (cleared by `new_game`).
