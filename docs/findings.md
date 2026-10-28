@@ -297,3 +297,27 @@ Speech end → first audio p50 1.95 s.
 
 The direct reflex worked when Kev was up: "Kevin, stop firing… you're not hitting any of them"
 → `hold_fire` with is_command 0.64.
+
+## 9. Fourth playtest (a30, after the §8 fixes) and biasing STT toward "Kevin"
+
+Session `1793161994` (~2.5 min in game, then off-game talk picked up by the mic). No Kev errors.
+
+- **Responsive until he went silent.** 15 of 17 in-game player lines scored `speak` ≥ 0.5 and got a
+  reply. From 148 s, "what's your favorite color?" (asked four times) scored 0.25-0.42 and got
+  silence. Nothing failed: Kev, which m8 only ever asked "should Kevin speak?" about game events,
+  gives player chit-chat a low score, and the brain now asks it for player lines too.
+- **Nothing was implanted.** `orders` stayed empty all session. Reflect saw "wait till they get
+  closer, okay? … Remember that." and returned `orders: []`, writing "Kevin is impatient with
+  holding his fire" into `remember` (a fact about Kevin, which its prompt forbids). Holding fire
+  worked only as Kev's reflex (`hold_fire`).
+- **Lag.** Speech end → first audio p50 2.25 s, p90 4.0 s, max 10 s. The worst reply waited 8.7 s
+  because its vision call shares Gemma slot 1 with Reflect and queued behind an 8 s Reflect run.
+
+**STT name bias.** Parakeet heard "Kevin" as Devin, David, Jebby, Debbie, Dabbit, Gavin, Plate.
+sherpa-onnx hotwords need beam search, and beam search on this model alone changed 143 of 647
+recorded clips, dropping short commands ("Cover." → "Okay."); stronger boosts insert "Kevin"
+everywhere ("Okay." → "Kevin."). Shipped: decode greedy and hotword-biased (score 1.25) in parallel
+and take from the biased pass only one-word swaps to "Kevin". Over the 647 clips this changes 15:
+13 misheard names fixed, 2 harmless wrong swaps ("Everyone needs help" → "Kevin needs help"),
+everything else identical. Live STT round trip p50 70 ms (was 65 ms). Still missed: "Evan",
+"Dabbit", "Plate", one "David".
