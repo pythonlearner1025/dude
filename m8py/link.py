@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from aiohttp import WSMsgType, web
 
 KIND_JSON, KIND_AUDIO, KIND_HEAR, KIND_VIEW = 1, 2, 3, 4
 
@@ -32,9 +33,12 @@ class GameLink:
         self.mic_muted = False
         self.speech_cooldown = 5.0
         self.writer: asyncio.StreamWriter | None = None
+        self.websocket: web.WebSocketResponse | None = None
         self._writer_lock = asyncio.Lock()
         self._view_future: asyncio.Future[View] | None = None
         self.server: asyncio.Server | None = None
+        self._logged_state = False
+        self._logged_audio = False
 
     async def start(self, port: int, bind: str = "127.0.0.1") -> None:
         self.server = await asyncio.start_server(self._connected, bind, port)
@@ -46,15 +50,22 @@ class GameLink:
         if self.writer:
             self.writer.close()
             await self.writer.wait_closed()
+        if self.websocket:
+            await self.websocket.close()
 
     async def _connected(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         writer.transport.set_write_buffer_limits(high=256 * 1024)
         old = self.writer
+        old_websocket = self.websocket
         self.writer = writer
+        self.websocket = None
+        self._logged_state = self._logged_audio = False
         peer = writer.get_extra_info("peername")
         print(f"[game] connected {peer}", flush=True)
         if old and old is not writer:
             old.close()
+        if old_websocket:
+            await old_websocket.close()
         await self.send_json(self.hello)
         try:
             while True:
@@ -69,6 +80,44 @@ class GameLink:
                 self.writer = None
             writer.close()
             print(f"[game] disconnected {peer}", flush=True)
+
+    async def websocket_connected(
+        self, request: web.Request, ws: web.WebSocketResponse
+    ) -> None:
+        """Use a WebSocket as the newest game link, treating messages as a byte stream."""
+        old_writer = self.writer
+        old_websocket = self.websocket
+        self.writer = None
+        self.websocket = ws
+        self._logged_state = self._logged_audio = False
+        peer = request.remote or "unknown"
+        print(f"[game] connected {peer} (websocket)", flush=True)
+        if old_writer:
+            old_writer.close()
+        if old_websocket and old_websocket is not ws:
+            await old_websocket.close()
+        await self.send_json(self.hello)
+        buffered = bytearray()
+        try:
+            async for msg in ws:
+                if msg.type != WSMsgType.BINARY:
+                    continue
+                buffered.extend(msg.data)
+                while len(buffered) >= 5:
+                    length = struct.unpack(">I", buffered[1:5])[0]
+                    if length > 64 * 1024 * 1024:
+                        await ws.close(code=1009, message=b"game frame too large")
+                        return
+                    if len(buffered) < 5 + length:
+                        break
+                    kind = buffered[0]
+                    payload = bytes(buffered[5 : 5 + length])
+                    del buffered[: 5 + length]
+                    await self.handle_frame(kind, payload)
+        finally:
+            if self.websocket is ws:
+                self.websocket = None
+            print(f"[game] disconnected {peer} (websocket)", flush=True)
 
     async def handle_frame(self, kind: int, payload: bytes) -> None:
         received_at = time.monotonic()
@@ -105,6 +154,9 @@ class GameLink:
         match msg.get("type"):
             case "state":
                 self.state = msg
+                if not self._logged_state:
+                    print("[game] received state", flush=True)
+                    self._logged_state = True
             case "settings":
                 if isinstance(msg.get("speech_cooldown"), (int, float)):
                     self.speech_cooldown = max(0.0, float(msg["speech_cooldown"]))
@@ -116,11 +168,26 @@ class GameLink:
 
     async def send_frame(self, kind: int, payload: bytes) -> None:
         async with self._writer_lock:
+            packet = bytes([kind]) + struct.pack(">I", len(payload)) + payload
+            websocket = self.websocket
+            if websocket:
+                try:
+                    await websocket.send_bytes(packet)
+                    if kind == KIND_AUDIO and not self._logged_audio:
+                        print(f"[game] sent audio frame ({len(payload)} bytes)", flush=True)
+                        self._logged_audio = True
+                except (ConnectionError, RuntimeError):
+                    if self.websocket is websocket:
+                        self.websocket = None
+                return
             if not self.writer:
                 return
             try:
-                self.writer.write(bytes([kind]) + struct.pack(">I", len(payload)) + payload)
+                self.writer.write(packet)
                 await self.writer.drain()
+                if kind == KIND_AUDIO and not self._logged_audio:
+                    print(f"[game] sent audio frame ({len(payload)} bytes)", flush=True)
+                    self._logged_audio = True
             except (ConnectionError, RuntimeError):
                 self.writer = None
 
