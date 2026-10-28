@@ -123,3 +123,26 @@ Sub-problems, in the order they block the experience:
 6. **The compute budget** (G1-G5): every new loop competes with voice and TTS on one GPU.
 7. **Memory as relationship** (F1, F3) and reliability (F2, H4).
 8. **Cost per game** (H1) and **evaluation** (I1-I3), which decide whether any of this generalises.
+
+## Constraints to design around in a fully neural Kevin
+
+Decided: the current build does **not** hard-code these (no new game skills per order type, no
+code-level condition watcher, no hard-coded arbitration between deciders). They stay open, as
+requirements for a learned solution where the brain itself discerns and does this:
+
+1. **The action list is a ceiling.** Kevin can only pick from the ~10-15 actions the game offers
+   at that moment; "stay ahead of me", "behind that rock", "hold fire until close", "the passenger
+   seat", "clear that area" have no action. A hand-written skill per order type is an
+   ever-growing list; a neural policy must compose behaviour from low-level control.
+2. **Conditions change without events.** "Hold fire until they're close" / "stay ahead of me"
+   become due when an enemy crosses a distance or the player moves — not on any game event — so an
+   event-driven decider never re-decides. A neural policy needs a continuous (tick-rate) view.
+3. **Two deciders, no arbiter.** A fast decider (Kev) and a slow reasoner (Reflect) can undo each
+   other's choices; who wins must be learned or structural, not a rule table.
+4. **Orders scroll away.** A decider that sees only the newest ~20 feed lines loses an order in
+   11-27 s (measured); persistence has to live in the model's state or memory.
+5. **Movement outcomes need geometry.** Prose state ("close by", "ahead" relative to Kevin's aim)
+   can't tell arrived / stuck / ahead-of-player; positions and headings are needed (being added as
+   state contract v2).
+6. **One GPU.** Voice, reasoning, vision, TTS and the game share one 24 GB card and one KV pool;
+   every extra loop costs voice latency.

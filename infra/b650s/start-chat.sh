@@ -14,7 +14,7 @@ model="$ROOT/models/gemma-4-12b-hauhaucs/Gemma4-12B-QAT-Uncensored-HauhauCS-Bala
 mmproj="$ROOT/models/gemma-4-12b-hauhaucs/mmproj-Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced-BF16.gguf"
 nohup "${LLAMA_SERVER:-$ROOT/llama.cpp/build/bin/llama-server}" \
     -m "$model" --mmproj "$mmproj" -ngl 99 -c "${CHAT_CTX:-32768}" -fa on \
-    -ctk q8_0 -ctv q8_0 --cache-ram 512 --reasoning off \
+    -ctk q8_0 -ctv q8_0 --cache-ram ${CHAT_CACHE_RAM:-4096} --reasoning off \
     --temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.05 --dry-multiplier 0.8 \
     --host 127.0.0.1 --port "${CHAT_PORT:-8081}" ${CHAT_EXTRA:-} \
     >>"$ROOT/logs/chat.log" 2>&1 &

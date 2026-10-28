@@ -14,7 +14,7 @@ model="$ROOT/models/qwen3.5-9b-hauhaucs/Qwen3.5-9B-Uncensored-HauhauCS-Aggressiv
 mmproj="$ROOT/models/qwen3.5-9b-hauhaucs/mmproj-Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-BF16.gguf"
 nohup "${LLAMA_SERVER:-$ROOT/llama.cpp/build/bin/llama-server}" \
     -m "$model" --mmproj "$mmproj" -ngl 99 -c "${CHAT_CTX:-32768}" -fa on \
-    -ctk q8_0 -ctv q8_0 --cache-ram 512 --reasoning off \
+    -ctk q8_0 -ctv q8_0 --cache-ram ${CHAT_CACHE_RAM:-4096} --reasoning off \
     --temp 0.7 --top-k 20 --top-p 0.8 --min-p 0 \
     --host 127.0.0.1 --port "${CHAT_PORT:-8081}" ${CHAT_EXTRA:-} \
     >>"$ROOT/logs/chat-qwen.log" 2>&1 &
