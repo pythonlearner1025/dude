@@ -414,7 +414,7 @@ async def test_look_cancels_and_resumes_reflect(cfg, tmp_path):
     async def handler(request):
         nonlocal reflect_calls
         body = json.loads(request.content)
-        if "response_format" in body and body["response_format"]["json_schema"]["name"] == "reflection":
+        if body["chat_template_kwargs"]["enable_thinking"]:  # Reflect; the look runs without
             reflect_calls += 1
             if reflect_calls == 1:
                 reflect_started.set()
@@ -430,7 +430,8 @@ async def test_look_cancels_and_resumes_reflect(cfg, tmp_path):
     b._request_reflect("test command")
     await reflect_started.wait()
 
-    what, _ = await b.look("describe", {"type": "action", "action": "look"}, trace.new_span("heard"))
+    msg = {"type": "action", "action": "look"}
+    what, _ = await b.look("describe", msg, trace.new_span("heard"))
     await b.reflect_task
 
     entries = [entry["data"] for entry in trace.entries if entry["kind"] == "reflect"]
