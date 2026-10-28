@@ -720,6 +720,8 @@ class Brain:
             }
         traced = json.loads(json.dumps(request))
         traced["messages"][1]["content"][1]["image_url"]["url"] = f"/view?name={filename}"
+        # Vision shares Gemma slot 1 with Reflect; waiting behind a Reflect run stalled replies 8 s.
+        resume_reflect = await self._interrupt_reflect()
         try:
             response = await self.client.post(self.cfg.llm.url, json=request)
             response.raise_for_status()
@@ -761,6 +763,9 @@ class Brain:
                 },
             )
             return "he can't see it", filename
+        finally:
+            if resume_reflect:
+                self._request_reflect("resume after look")
         span.mark("look_done")
         self.trace.add(
             "sight",
@@ -791,7 +796,7 @@ class Brain:
             "id_slot": 0,
             "chat_template_kwargs": {"enable_thinking": False},
         }
-        resume_reflect = await self._interrupt_reflect_for_voice()
+        resume_reflect = await self._interrupt_reflect()
         generation = self.speaking.generation
         started = time.monotonic()
         span.mark("llm_request")
@@ -875,7 +880,7 @@ class Brain:
             self._request_reflect("resume after voice")
         return streaming_started
 
-    async def _interrupt_reflect_for_voice(self) -> bool:
+    async def _interrupt_reflect(self) -> bool:
         task = self.reflect_task
         if not task or task.done():
             return False

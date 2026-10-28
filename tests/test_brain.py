@@ -404,3 +404,38 @@ async def test_quiet_event(cfg, tmp_path, monkeypatch):
     assert seen == [(brainmod.QUIET_EVENT, True)]
     await client.aclose()
     await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_look_cancels_and_resumes_reflect(cfg, tmp_path):
+    reflect_started = asyncio.Event()
+    reflect_calls = 0
+
+    async def handler(request):
+        nonlocal reflect_calls
+        body = json.loads(request.content)
+        if "response_format" in body and body["response_format"]["json_schema"]["name"] == "reflection":
+            reflect_calls += 1
+            if reflect_calls == 1:
+                reflect_started.set()
+                await asyncio.Event().wait()
+            content = json.dumps({"orders": [], "remember": []})
+            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "A rock."}}]})
+
+    b, link, trace, client = make(cfg, tmp_path, handler)
+    link.view = lambda timeout=2: asyncio.sleep(
+        0, result=SimpleNamespace(rgb=bytearray(b"\x00\x00\x00"), width=1, height=1, spots=[])
+    )
+    b._request_reflect("test command")
+    await reflect_started.wait()
+
+    what, _ = await b.look("describe", {"type": "action", "action": "look"}, trace.new_span("heard"))
+    await b.reflect_task
+
+    entries = [entry["data"] for entry in trace.entries if entry["kind"] == "reflect"]
+    assert what == "A rock."
+    assert [entry["interrupted"] for entry in entries] == [True, False]
+    assert entries[-1]["reason"] == "resume after look"
+    await client.aclose()
+    await trace.close()
