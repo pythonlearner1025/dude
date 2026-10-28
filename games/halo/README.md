@@ -30,3 +30,8 @@ allows it (`?set=HALO_SKIP_CINEMATICS=0` restores them), and a fresh level start
 `new_game` message that clears the mate's memory and stored checkpoint memories
 (`docs/reports/halo-levels-skip-reset.md`). `?perf=1` logs the game's frame times to the browser
 console (`docs/reports/halo-web-perf.md`).
+
+The companion state (patch at OpenCE `4a5975b6`) carries structured fields beside the prose:
+`kevin{pos, facing, activity, target, vehicle}`, `player{pos, facing, aim, vehicle}`,
+`kevin_from_player{distance_m, bearing_deg}` and `enemies[]`, plus player-relative sentences
+("Kevin is 5 m behind you"). m8py's validator reads them to tell whether an action finished.

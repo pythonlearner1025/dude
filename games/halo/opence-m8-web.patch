@@ -12,10 +12,381 @@ index 9dc7c289..e68a180f 100644
  | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
  | `network.address` | `""` | `HALO_NET_ADDRESS` | The IPv4 address of this machine for system link. Refer to "Play on one computer". |
 diff --git a/port/linux/game/companion.c b/port/linux/game/companion.c
-index f81247de..0c1fc3fc 100644
+index f81247de..1aafba29 100644
 --- a/port/linux/game/companion.c
 +++ b/port/linux/game/companion.c
-@@ -2506,6 +2506,22 @@ static void companion_send_save(
+@@ -259,6 +259,8 @@ struct companion_body
+ 	real_vector3d look;
+ 	boolean look_at_player;
+ 	long look_until;
++	/* mate's go_to/go_aim chose hold_point, rather than an ordinary stay */
++	boolean point_target;
+ };
+ 
+ /* a weapon lying near him, or a vehicle */
+@@ -1511,6 +1513,7 @@ static void companion_set_order(
+ 	companion_body.order = order;
+ 	companion_body.target_unit_index = target_unit_index;
+ 	companion_body.hold_fire = hold_fire;
++	companion_body.point_target = FALSE;
+ 	if (hold_fire)
+ 		companion_body.engaging = FALSE;
+ }
+@@ -1608,6 +1611,7 @@ static void companion_handle_messages(
+ 			{
+ 				companion_set_order(_companion_order_hold, companion_body.target_unit_index, companion_body.hold_fire);
+ 				companion_body.hold_point = strstr(message, "\"action\":\"go_to\"") ? companion_view_spots[spot - 1] : aim;
++				companion_body.point_target = TRUE;
+ 				companion_body.goal_valid = FALSE;
+ 			}
+ 		}
+@@ -1959,13 +1963,244 @@ static void companion_add_view(
+ 		strcat(actions, one);
+ }
+ 
++static real companion_facing_degrees(
++	real_vector3d const *forward)
++{
++	real degrees = RADIANS_TO_DEGREES((real)atan2(forward->j, forward->i));
++
++	return degrees < 0.f ? degrees + 360.f : degrees;
++}
++
++static real companion_relative_bearing(
++	real_point3d const *player,
++	real_vector3d const *facing,
++	real_point3d const *point)
++{
++	real bearing = RADIANS_TO_DEGREES((real)atan2(facing->j, facing->i) -
++		(real)atan2(point->y - player->y, point->x - player->x));
++
++	while (bearing > 180.f)
++		bearing -= 360.f;
++	while (bearing < -180.f)
++		bearing += 360.f;
++	return bearing;
++}
++
++static char const *companion_relative_words(
++	real bearing)
++{
++	real absolute = (real)fabs(bearing);
++
++	if (absolute <= 15.f)
++		return "ahead of you";
++	if (absolute <= 60.f)
++		return bearing > 0.f ? "ahead of you, slightly to the right" : "ahead of you, slightly to the left";
++	if (absolute <= 120.f)
++		return bearing > 0.f ? "to your right" : "to your left";
++	if (absolute <= 165.f)
++		return bearing > 0.f ? "behind you, slightly to the right" : "behind you, slightly to the left";
++	return "behind you";
++}
++
++static char const *companion_activity(
++	void)
++{
++	switch (companion_body.order)
++	{
++	case _companion_order_follow: return "following";
++	case _companion_order_attack: return "attacking";
++	case _companion_order_advance: return "rushing";
++	case _companion_order_cover: return "cover";
++	case _companion_order_retreat: return "falling_back";
++	case _companion_order_pick_up: return "going_to_weapon";
++	case _companion_order_get_in: return "going_to_vehicle";
++	default: return "holding";
++	}
++}
++
++static char const *companion_seat_name(
++	struct unit_datum const *unit)
++{
++	struct unit_definition *definition;
++	struct unit_seat *seat;
++
++	if (unit->object.parent_object_index == NONE || unit->unit.parent_seat_index == NONE)
++		return NULL;
++	definition = unit_definition_get(unit_get(unit->object.parent_object_index)->definition_index);
++	seat = TAG_BLOCK_GET_ELEMENT(&definition->unit.seats, unit->unit.parent_seat_index, struct unit_seat);
++	if (TEST_FLAG(seat->flags, _unit_seat_driver_bit))
++		return "driver";
++	if (TEST_FLAG(seat->flags, _unit_seat_gunner_bit))
++		return "gunner";
++	return "passenger";
++}
++
++/* an object's id only when it is one of the current action options */
++static long companion_option_id(
++	long object_index)
++{
++	short index;
++
++	for (index = 0; index < companion_enemy_count; index++)
++	{
++		if (companion_enemies[index].unit_index == object_index)
++			return object_index & 0xFFFF;
++	}
++	for (index = 0; index < companion_weapon_count; index++)
++	{
++		if (companion_weapons[index].object_index == object_index)
++			return object_index & 0xFFFF;
++	}
++	for (index = 0; index < companion_vehicle_count; index++)
++	{
++		if (companion_vehicles[index].object_index == object_index)
++			return object_index & 0xFFFF;
++	}
++	return NONE;
++}
++
++static void companion_vehicle_json(
++	struct unit_datum const *unit,
++	char *json,
++	int size)
++{
++	char const *seat = companion_seat_name(unit);
++
++	if (!seat)
++	{
++		snprintf(json, size, "null");
++		return;
++	}
++	snprintf(json, size, "{\"name\":\"%s\",\"seat\":\"%s\"}",
++		companion_unit_kind(unit->object.parent_object_index), seat);
++}
++
++static boolean companion_player_aim(
++	real_point3d *point,
++	char const **label,
++	long *id,
++	real *distance)
++{
++	struct render_camera camera;
++	struct render_frustum frustum;
++	real_vector3d along;
++	struct collision_result collision;
++	long object_index;
++
++	if (!companion_view_camera(&camera, &frustum))
++		return FALSE;
++	along = camera.forward;
++	normalize3d(&along);
++	scale_vector3d(&along, COMPANION_VIEW_REACH, &along);
++	if (!collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
++			FLAG(_collision_test_objects_bit) | _collision_test_objects_all_types_flags,
++			&camera.position, &along, companion_player_unit(), &collision))
++	{
++		return FALSE;
++	}
++	*point = collision.point;
++	*distance = distance3d(&camera.position, point) * COMPANION_METRES_PER_UNIT;
++	*id = NONE;
++	if (collision.type != _collision_result_object)
++	{
++		*label = collision.plane.n.k >= 0.6f ? "ground" : "wall";
++		return TRUE;
++	}
++	object_index = collision.object_index;
++	*id = companion_option_id(object_index);
++	if (*id == NONE)
++	{
++		long parent_index = object_get_ultimate_parent(object_index);
++
++		if (parent_index != object_index && companion_option_id(parent_index) != NONE)
++		{
++			object_index = parent_index;
++			*id = companion_option_id(object_index);
++		}
++	}
++	*label = companion_unit_kind(object_index);
++	return TRUE;
++}
++
++static void companion_target_json(
++	long player_unit_index,
++	char *json,
++	int size)
++{
++	struct companion_enemy const *target = companion_current_target();
++	real_point3d point;
++	char const *kind;
++	char const *label;
++	long object_index;
++	long id;
++
++	if (target)
++	{
++		if (target->unit_index == player_unit_index)
++		{
++			object_get_origin(player_unit_index, &point);
++			kind = "player";
++			label = "Chief";
++			id = NONE;
++		}
++		else
++		{
++			point = target->aim_point;
++			kind = object_get(target->unit_index)->object.type == _object_type_vehicle ? "vehicle" : "unit";
++			label = companion_unit_kind(target->unit_index);
++			id = target->unit_index & 0xFFFF;
++		}
++	}
++	else if (companion_body.order == _companion_order_pick_up || companion_body.order == _companion_order_get_in)
++	{
++		object_index = companion_body.goal_object_index;
++		point = object_get(object_index)->object.bounding_sphere_center;
++		kind = companion_body.order == _companion_order_pick_up ? "weapon" : "vehicle";
++		label = companion_unit_kind(object_index);
++		id = object_index & 0xFFFF;
++	}
++	else if (companion_body.point_target)
++	{
++		point = companion_body.hold_point;
++		kind = "point";
++		label = "chosen point";
++		id = NONE;
++	}
++	else if (companion_body.order == _companion_order_follow)
++	{
++		object_get_origin(player_unit_index, &point);
++		kind = "player";
++		label = "Chief";
++		id = NONE;
++	}
++	else
++	{
++		snprintf(json, size, "null");
++		return;
++	}
++	if (id == NONE)
++	{
++		snprintf(json, size,
++			"{\"kind\":\"%s\",\"id\":null,\"label\":\"%s\",\"pos\":[%.2f,%.2f,%.2f]}",
++			kind, label, point.x * COMPANION_METRES_PER_UNIT, point.y * COMPANION_METRES_PER_UNIT,
++			point.z * COMPANION_METRES_PER_UNIT);
++	}
++	else
++	{
++		snprintf(json, size,
++			"{\"kind\":\"%s\",\"id\":\"%ld\",\"label\":\"%s\",\"pos\":[%.2f,%.2f,%.2f]}",
++			kind, id, label, point.x * COMPANION_METRES_PER_UNIT, point.y * COMPANION_METRES_PER_UNIT,
++			point.z * COMPANION_METRES_PER_UNIT);
++	}
++}
++
+ /* the game as mate needs it: what is going on, in words, and what Kevin can
+ do (its decision model picks one) */
+ static void companion_send_state(
+ 	long player_unit_index)
+ {
+ 	struct unit_datum *player_unit = unit_get(player_unit_index);
+-	char state[1536];
++	char state[2048];
+ 	char options[1024] = "";
+ 	char melee_options[512] = "";
+ 	char weapon_options[512] = "";
+@@ -1974,7 +2209,9 @@ static void companion_send_state(
+ 	char found_vehicles[512];
+ 	char actions[8192] = "";
+ 	char one[160];
+-	char json[12288];
++	char json[16384];
++	char state_v2[6144] = "";
++	char enemies_v2[3072] = "";
+ 	real_point3d player_origin;
+ 	short index;
+ 
+@@ -1987,6 +2224,16 @@ static void companion_send_state(
+ 		char weapon[384] = "no weapon";
+ 		char doing[96];
+ 		real_point3d origin;
++		real_point3d aim_point;
++		char const *aim_label;
++		long aim_id;
++		real aim_distance;
++		real kevin_distance;
++		real kevin_bearing;
++		char kevin_target[320];
++		char kevin_vehicle[128];
++		char player_vehicle[128];
++		char aim_json[320] = "null";
+ 		int metres;
+ 
+ 		if (weapon_index != NONE)
+@@ -2045,6 +2292,17 @@ static void companion_send_state(
+ 			/* (whole options only, so that the JSON stays whole) */
+ 			if (strlen(options) + strlen(json) < sizeof(options))
+ 				strcat(options, json);
++			snprintf(json, sizeof(json),
++				"%s{\"id\":\"%ld\",\"kind\":\"%s\",\"pos\":[%.2f,%.2f,%.2f],\"distance_m\":%.1f,\"in_sight\":%s}",
++				enemies_v2[0] ? "," : "", companion_enemies[index].unit_index & 0xFFFF,
++				companion_unit_kind(companion_enemies[index].unit_index),
++				companion_enemies[index].aim_point.x * COMPANION_METRES_PER_UNIT,
++				companion_enemies[index].aim_point.y * COMPANION_METRES_PER_UNIT,
++				companion_enemies[index].aim_point.z * COMPANION_METRES_PER_UNIT,
++				companion_enemies[index].distance * COMPANION_METRES_PER_UNIT,
++				companion_enemies[index].visible ? "true" : "false");
++			if (strlen(enemies_v2) + strlen(json) < sizeof(enemies_v2))
++				strcat(enemies_v2, json);
+ 			if (companion_enemies[index].distance <= COMPANION_MELEE_DISTANCE)
+ 			{
+ 				snprintf(json, sizeof(json), "%s\"%ld\":\"%s\"", melee_options[0] ? "," : "",
+@@ -2129,6 +2387,41 @@ static void companion_send_state(
+ 			companion_add_action(actions, sizeof(actions), "flashlight",
+ 				unit->unit.integrated_light_power > 0.f ? "switches his flashlight off" : "switches his flashlight on", NULL);
+ 		}
++
++		kevin_distance = distance3d(&origin, &player_origin) * COMPANION_METRES_PER_UNIT;
++		kevin_bearing = companion_relative_bearing(&player_origin, &player_unit->object.forward, &origin);
++		snprintf(one, sizeof(one), " Kevin is %d m %s.", (int)kevin_distance,
++			companion_relative_words(kevin_bearing));
++		strncat(state, one, sizeof(state) - strlen(state) - 1);
++		if (companion_player_aim(&aim_point, &aim_label, &aim_id, &aim_distance))
++		{
++			if (aim_id == NONE)
++				snprintf(aim_json, sizeof(aim_json),
++					"{\"pos\":[%.2f,%.2f,%.2f],\"label\":\"%s\",\"id\":null,\"distance_m\":%.1f}",
++					aim_point.x * COMPANION_METRES_PER_UNIT, aim_point.y * COMPANION_METRES_PER_UNIT,
++					aim_point.z * COMPANION_METRES_PER_UNIT, aim_label, aim_distance);
++			else
++				snprintf(aim_json, sizeof(aim_json),
++					"{\"pos\":[%.2f,%.2f,%.2f],\"label\":\"%s\",\"id\":\"%ld\",\"distance_m\":%.1f}",
++					aim_point.x * COMPANION_METRES_PER_UNIT, aim_point.y * COMPANION_METRES_PER_UNIT,
++					aim_point.z * COMPANION_METRES_PER_UNIT, aim_label, aim_id, aim_distance);
++			snprintf(one, sizeof(one), " You're aiming at a%s %s, %d m away.",
++				strchr("aeiou", aim_label[0]) ? "n" : "", aim_label, (int)aim_distance);
++			strncat(state, one, sizeof(state) - strlen(state) - 1);
++		}
++		companion_target_json(player_unit_index, kevin_target, sizeof(kevin_target));
++		companion_vehicle_json(unit, kevin_vehicle, sizeof(kevin_vehicle));
++		companion_vehicle_json(player_unit, player_vehicle, sizeof(player_vehicle));
++		snprintf(state_v2, sizeof(state_v2),
++			"\"kevin\":{\"pos\":[%.2f,%.2f,%.2f],\"facing\":%.1f,\"activity\":\"%s\",\"target\":%s,\"vehicle\":%s},"
++			"\"player\":{\"pos\":[%.2f,%.2f,%.2f],\"facing\":%.1f,\"aim\":%s,\"vehicle\":%s},"
++			"\"kevin_from_player\":{\"distance_m\":%.1f,\"bearing_deg\":%.1f},\"enemies\":[%s],",
++			origin.x * COMPANION_METRES_PER_UNIT, origin.y * COMPANION_METRES_PER_UNIT,
++			origin.z * COMPANION_METRES_PER_UNIT, companion_facing_degrees(&unit->object.forward),
++			companion_activity(), kevin_target, kevin_vehicle,
++			player_origin.x * COMPANION_METRES_PER_UNIT, player_origin.y * COMPANION_METRES_PER_UNIT,
++			player_origin.z * COMPANION_METRES_PER_UNIT, companion_facing_degrees(&player_unit->object.forward),
++			aim_json, player_vehicle, kevin_distance, kevin_bearing, enemies_v2);
+ 	}
+ 	else
+ 	{
+@@ -2139,9 +2432,9 @@ static void companion_send_state(
+ 
+ 	snprintf(json, sizeof(json),
+ 		"{\"type\":\"state\",\"game\":\"Halo: Combat Evolved\",\"player_name\":\"Chief\",\"level\":\"%s\","
+-		"\"in_combat\":%s,\"on_radio\":%s,\"state\":\"%s\",\"actions\":[%s]}",
++		"\"in_combat\":%s,\"on_radio\":%s,\"state\":\"%s\",%s\"actions\":[%s]}",
+ 		tag_name_strip_path(tag_get_name(global_scenario_index)), companion_enemy_count ? "true" : "false",
+-		companion_on_radio ? "true" : "false", state, actions);
++		companion_on_radio ? "true" : "false", state, state_v2, actions);
+ 	mate_link_send(json);
+ }
+ 
+@@ -2506,6 +2799,22 @@ static void companion_send_save(
  	mate_link_send(json);
  }
  
@@ -38,7 +409,7 @@ index f81247de..0c1fc3fc 100644
  /* a gain in DirectSound's millibels (as sound_dsound_xbox.c's
  dsound_volume_from_gain, and above 1 too: his voice can be turned up past
  the game's) */
-@@ -2749,6 +2765,18 @@ void companion_note_loaded(
+@@ -2749,6 +3058,18 @@ void companion_note_loaded(
  	companion_respawn_time = 0;
  }
  
@@ -57,7 +428,7 @@ index f81247de..0c1fc3fc 100644
  /* scripted dialogue beginning to play, for mate to hear: Cortana and the crew
  on the radio (no source), and the cutscenes' (heard, not answered) */
  void companion_note_sound(
-@@ -2768,7 +2796,8 @@ void companion_note_sound(
+@@ -2768,7 +3089,8 @@ void companion_note_sound(
  		definition->sound_class != _sound_class_scripted_dialog_to_other &&
  		definition->sound_class != _sound_class_scripted_dialog_force_unspatialized) ||
  		permutation->compression != 1 /* Xbox ADPCM, the only one that plays */ ||
@@ -67,7 +438,7 @@ index f81247de..0c1fc3fc 100644
  	{
  		return;
  	}
-@@ -2837,6 +2866,7 @@ void companion_update(
+@@ -2837,6 +3159,7 @@ void companion_update(
  	struct unit_datum *player_unit;
  
  	mate_link_start();
