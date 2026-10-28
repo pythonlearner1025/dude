@@ -185,3 +185,72 @@ silent, with nothing visible to the player. Fix: `-np 2 -kvu` (both slots share 
 `n_ctx_slot = 32768`). Two lessons for the runtime: count real tokens (the server's `/tokenize`)
 instead of chars/4, and treat a context-size rejection as a signal to fold memory and retry, not
 as a silent failure.
+
+## 7. Second playtest: Gemma4-12B uncensored, a30 "Halo", fresh level start
+
+Session `1793153795` (8.6 min): level grid → a10 → a30, `new_game` reset Kevin's memory on both
+starts; a30's opening cinematic was auto-skipped. Stack: Kev-4B **Q4_K_M** + Gemma4-12B
+(`-np 2 -kvu`) + Breeze (m8's fast flags). Same Mac browser setup as §5.
+
+| | Qwen3.5-9B session (§5, b30) | **Gemma4-12B session (a30)** |
+| --- | ---: | ---: |
+| Player lines per minute | 2.5 | **9.8** (84 in 8.6 min) |
+| Mate lines cut off | 37 / 70 (53%) | **12 / 88 (14%)** |
+| Words per mate line, median (max) | 96 (213) | **11 (47)** |
+| Speech per reply (turn start → last audio), p50 | 4.2 s (p90 20 s) | **2.3 s** (p90 4.4 s) |
+| Stage actions sent to TTS as "directions" | 95 / 114 | **3 / 157** |
+| Lines opening with `[yelling …]` | 56 / 70 | 55 / 88 |
+| Player speech end → first audio, p50 / p90 / max | 1.0 / 2.2 / 8.0 s | **1.36 / 3.8 / 9.8 s** |
+| LLM first token, p50 / p90 | 166 / 286 ms | **510 / 869 ms** |
+| Kev decision chain, p50 | 476 ms (Q8) | 357 ms (Q4) |
+| Input queue wait, p90 / max | 2.5 / 8.3 s | 1.1 / 8.2 s |
+| Errors | none | none |
+
+The earlier Gemma session `1793152598` (23 exchanges at the launcher, no game connected, so no
+actions and no audible replies) had median 25 words and 0.91 s mouth-to-ear.
+
+What it felt like (from the transcript):
+
+1. **Squad chatter instead of speeches.** Short callouts ("On it! Watch your flank, Chief!",
+   "Got one! That little squeaky shit's toast!") made rapid back-and-forth possible: the player
+   talked ~4x more, and interrupted far less. Brevity, not latency, was the main fix: replacing
+   the model fixed what the prompt alone could not.
+2. **Orders landed more often:** "hide behind this rock" → `cover`, "hold your fire" →
+   `hold_fire` (twice), "follow me" → `follow`, "get up" → `stand_up`, "time to get down" →
+   `crouch`.
+3. **Grounded banter, the good part:** "Isn't the sky beautiful?" → "It's fucking gorgeous, but
+   it's gonna look real nice when that Banshee's guts are scattered across it!" (a Banshee
+   appeared that moment); "holding on like a dog" → "That's a bit harsh, Chief. At least I'm a
+   loyal one."; friendly fire → "Hey! You trying to kill me or—".
+4. **Movement orders still fail: says ≠ does.** The last ~2 minutes were ~10 variants of "go
+   where I'm pointing / go clear that area out / go in". Kevin answered "On it! [charges
+   forward]" each time while Kev alternated `follow` and `go_aim` (twice `follow` for "go where I'm
+   pointing"), until the player said "Not listening to me, man." Same failure as §5, now for
+   movement: the line promises an action the policy didn't choose.
+5. **New tics.** `[rapid fire]` inside ~40 lines (a sound/action note, useless as a TTS
+   instruction), `[yelling]` openers 55 / 88, consecutive near-identical callouts ("Right side's
+   mine!" twice).
+6. **Answers to noise.** Fragments and fillers ("Eighth.", "Refer.", "Okay, um", "Yeah.") each got
+   a reply because m8 always answers the player; at 10 player lines a minute that is a lot of
+   unneeded talk.
+7. **Hallucinated scene details** remain occasional ("[kicks the Elite's corpse]" before any
+   Elite died; answering the player as if they were Cortana: "you glowing orb!").
+8. **STT on names and terms:** "Evan" (Kevin), "where I'm eating" (aiming), "Targent", "Go clock".
+9. **Cost of the bigger model:** first token ~3x slower than Qwen (510 vs 166 ms p50), so
+   mouth-to-ear rose to 1.36 s p50 even though lines got much shorter.
+
+Takeaways for the general architecture (§ `docs/general-architecture.md`):
+
+- **Bind speech to the chosen action.** Generate the line *after* the action is chosen and pass it
+  as a hard fact ("you are doing: go_aim"), forbid narrating other actions, or let one model emit
+  {action, line} together. The persona's "what you say you'll do, you do" must be enforced by the
+  runtime, not requested in the prompt.
+- **A fast path for player imperatives.** Classify the utterance (command / question / banter /
+  filler) first; map commands to an offered action with a small, game-tuned model; answer filler
+  with silence or a two-word acknowledgement.
+- **Sentence-level hygiene.** Strip or whitelist bracket notes (keep real voice directions, drop
+  `[rapid fire]`-style actions), block n-grams repeated within the last ~20 lines.
+- **Name/term biasing for STT** (mate's name, "aim", game vocabulary).
+- **The model matters more than the prompt for brevity and banter** — a 12B that follows style
+  instructions beat a faster 9B that didn't; keeping latency there needs a smaller/faster decoder
+  or speculative decoding (Gemma's MTP draft head is published alongside the GGUF).
