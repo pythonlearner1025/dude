@@ -5,7 +5,7 @@ import json
 import struct
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from aiohttp import WSMsgType, web
@@ -39,6 +39,10 @@ class GameLink:
         self.server: asyncio.Server | None = None
         self._logged_state = False
         self._logged_audio = False
+        self.state_observers: list[Callable[[dict[str, Any]], None]] = []
+
+    def add_state_observer(self, observer: Callable[[dict[str, Any]], None]) -> None:
+        self.state_observers.append(observer)
 
     async def start(self, port: int, bind: str = "127.0.0.1") -> None:
         self.server = await asyncio.start_server(self._connected, bind, port)
@@ -154,6 +158,8 @@ class GameLink:
         match msg.get("type"):
             case "state":
                 self.state = msg
+                for observer in self.state_observers:
+                    observer(msg)
                 if not self._logged_state:
                     print("[game] received state", flush=True)
                     self._logged_state = True

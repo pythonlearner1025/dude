@@ -1,6 +1,6 @@
 import pytest
 
-from m8py.text import Notes, Piece, PieceKind, SentenceSplitter, clean
+from m8py.text import Notes, Piece, PieceKind, SentenceSplitter, clean, delivery_note
 
 
 @pytest.mark.parametrize(
@@ -69,3 +69,16 @@ def test_note_causes_mid_sentence_flush():
     if rest := split.finish():
         out.append((rest, how))
     assert out == [("Hello brave", ""), ("soldier.", "quiet"), ("Next", "quiet")]
+
+
+@pytest.mark.parametrize(
+    ("note", "expected"),
+    [
+        ("quiet and tired", "quiet and tired"),
+        ("yelling over the gunfire", "yelling over the gunfire"),
+        ("reloads his rifle", ""),
+        ("walks toward the Warthog", ""),
+    ],
+)
+def test_delivery_note_allowlist(note, expected):
+    assert delivery_note(note) == expected

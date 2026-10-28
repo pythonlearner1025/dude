@@ -57,8 +57,14 @@ def model_app(kind: str, latency: float = 0.02, token_delay: float = 0.005) -> w
         await asyncio.sleep(latency)
         if body.get("response_format"):
             schema = body["response_format"].get("json_schema", {}).get("schema", {})
-            enum = schema.get("properties", {}).get("spot", {}).get("enum", [0])
-            content = json.dumps({"place": "the marked ground", "spot": enum[-1]})
+            properties = schema.get("properties", {})
+            if "orders" in properties:
+                content = json.dumps(
+                    {"orders": ["Follow the player's latest command"], "remember": []}
+                )
+            else:
+                enum = properties.get("spot", {}).get("enum", [0])
+                content = json.dumps({"place": "the marked ground", "spot": enum[-1]})
         elif not body.get("stream", False):
             content = "Kevin remembered the important events and the people involved."
         else:
