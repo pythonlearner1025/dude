@@ -321,3 +321,12 @@ and take from the biased pass only one-word swaps to "Kevin". Over the 647 clips
 13 misheard names fixed, 2 harmless wrong swaps ("Everyone needs help" → "Kevin needs help"),
 everything else identical. Live STT round trip p50 70 ms (was 65 ms). Still missed: "Evan",
 "Dabbit", "Plate", one "David".
+
+**Answering the player (after §9).** Kev's `speak` score was replaced as the gate for spoken player
+lines. On 305 hand-labelled lines from the last three sessions (108 real, 197 filler or cut-off
+fragments), Kev's "Should Kevin speak now?" answered 45 of 108 real lines; three reworded Kev
+questions did no better (AUC 0.64-0.70). Parakeet ends complete utterances with `.`, `?` or `!`, so a
+line now counts as noise when it has no closing punctuation or is only filler words ("uh", "yeah",
+"okay"…): 104 of 108 real lines answered (the 4 misses are long off-game sentences split by the
+VAD), 166 of 197 noise lines dropped. Typed lines are always answered; game events still use Kev.
+Reflect now also pauses while a vision call runs on slot 1.
