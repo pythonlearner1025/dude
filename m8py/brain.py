@@ -76,6 +76,7 @@ def joint_options(
                 key = f"{action_name}: {option}"
                 criteria[key] = f"{name} {description}: {label}"
                 choices[key] = (action_name, str(option))
+            continue
         criteria[action_name] = f"{name} {description}"
         choices[action_name] = (action_name, None)
     return criteria, choices
@@ -738,7 +739,8 @@ class Brain:
                     what = "none that fits"
             else:
                 what = clean(output)
-                await self.validator.send(self.state(), str(msg.get("action", "")))
+                self.validator.current = ActionStatus(str(msg.get("action", "")), status="done")
+                self._validator_changed(self.validator.current)
         except Exception as exc:
             span.set_error("vision", exc)
             print(f"[sight] {kind}: error {exc}", flush=True)
