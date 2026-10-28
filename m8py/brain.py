@@ -193,8 +193,8 @@ class Brain:
     def doing_text(self) -> str:
         current = self.validator.current
         if not current:
-            return "Kevin is doing: nothing (done)"
-        return f"Kevin is doing: {current.display()} ({current.status})"
+            return "Kevin's current action: nothing (done)"
+        return f"Kevin's current action: {current.display()} ({current.status})"
 
     def right_now(self) -> str:
         return f"Right now: {self.fill(str(self.state().get('state', 'unknown')))}"
@@ -205,8 +205,9 @@ class Brain:
     def voice_system(self) -> str:
         return (
             self.system()
-            + "\n\nRuntime rule: Kevin may only describe what he is actually doing according to "
-            "the final 'Kevin is doing' line. Never claim he is doing any other action."
+            + "\n\nRuntime rule: reply only with the words Kevin says out loud, in first person. "
+            "Never narrate or describe his actions. His current action is listed below; if he "
+            "mentions what he is doing, it must match it."
         )
 
     def situation(self) -> str:
@@ -395,17 +396,19 @@ class Brain:
                         "Maintain Kevin's durable orders and relationship memory. Orders are "
                         "the standing instructions the player has given Kevin that still apply: "
                         "keep the player's conditions and wording, add new ones, and drop ones "
-                        "the player cancelled or that are finished. Remember holds only facts "
-                        "about the player or the relationship, never what Kevin did. Never send "
-                        "or propose a game action. Output JSON only with exactly: orders (the "
-                        "full replacement list of short imperative strings) and remember (new "
-                        "facts, often none)."
+                        "the player cancelled or that are finished. Ignore talk that is not "
+                        "addressed to Kevin. Remember holds only lasting facts about the player "
+                        "or the relationship (names, preferences, promises); never positions, "
+                        "health, ammo, targets or anything about the current moment, and never "
+                        "what Kevin did. Never send or propose a game action. Output JSON only "
+                        "with exactly: orders and remember, each the full replacement list of "
+                        "short strings."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"Reason: {reason}\n\n{self.orders_text()}\n\n{self.remembers_text()}"
+                        f"{self.orders_text()}\n\n{self.remembers_text()}"
                         f"\n\nSummary:\n{self.memory.summary or 'none'}\n\n"
                         "Append-only log (newest last):\n"
                         + ("\n".join(self.reflect_log) or "none")
@@ -448,9 +451,7 @@ class Brain:
             if orders != self.memory.orders:
                 self.memory.orders = orders
                 self.trace.add("orders", {"orders": orders, "reason": reason})
-            for fact in remember:
-                if fact not in self.memory.remember:
-                    self.memory.remember.append(fact)
+            self.memory.remember = remember
         except asyncio.CancelledError:
             interrupted = True
             raise
@@ -463,6 +464,7 @@ class Brain:
                     "request": request,
                     "output": output,
                     "ms": round((time.monotonic() - started) * 1000),
+                    "reason": reason,
                     "interrupted": interrupted,
                     "error": error,
                 },
