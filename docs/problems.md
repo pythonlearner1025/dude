@@ -3,8 +3,8 @@
 Everything we have observed while running m8's architecture (Python port `m8py`) in Halo CE, with
 evidence, before choosing a design. Sources: two live sessions (`findings.md` §5 Qwen3.5-9B / b30,
 §7 Gemma4-12B / a30; 148 player lines), fake-game benchmarks (§3), server benchmarks (§1-2, §6),
-and the infrastructure work. The replay benchmark in `tools/bench_commands/` will add numbers to
-the instruction-following items.
+and the infrastructure work. (A replay benchmark was considered and dropped; later playtests in
+`findings.md` §8-10 measure the same items live.)
 
 Severity: **S1** breaks the experience, **S2** clearly hurts it, **S3** friction. Kind: **R** open
 research/design question, **E** engineering with a known fix.

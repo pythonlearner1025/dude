@@ -262,8 +262,8 @@ Reading: the three loops are the better runtime skeleton (multi-rate, latency-aw
 but they don't by themselves supply the four things the failures point to: durable orders,
 tick-rate condition checks, spatial referents, and action outcome feedback. A hybrid keeps the
 three loops, has REFLECT write validated typed directives (not one-off actions), and lets a small
-executor enforce them between REFLECT cycles. To be decided by the replay benchmark and the GPU
-contention test (`tools/bench_commands/`), not by argument.
+executor enforce them between REFLECT cycles. (Neither the replay benchmark nor the GPU
+contention test was built; the chosen design and its playtests are in `findings.md` §8-10.)
 
 ## 5. The character factory (training infrastructure)
 
