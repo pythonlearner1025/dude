@@ -173,3 +173,15 @@ two paragraphs of ~100 — the brevity instructions are followed much better. Ke
 differently on the same 11-way prompt (`look` vs `shoot`, both at confidence ~0.1; the prompt
 ended with the player asking "What do you see over there?", so Q4's pick is arguably better).
 Launch: `infra/b650s/start-stack-gemma.sh` (and `start-stack-qwen.sh` for the fallback).
+
+### A context-size trap (fixed)
+
+Starting llama-server with an explicit `-np 2` switches the KV cache to per-slot
+(`kv_unified = false`) and splits `-c 32768` into 16 384 tokens per slot. m8 assumes 32k per
+request ("the servers take 32k a request"; the feed folds only above ~16-20k tokens by a
+chars/4 estimate). After a long session the real request reached 18.1k tokens and **every** LLM
+call failed with HTTP 400 (`exceeds the available context size (16384 tokens)`): the mate went
+silent, with nothing visible to the player. Fix: `-np 2 -kvu` (both slots share one 32k pool;
+`n_ctx_slot = 32768`). Two lessons for the runtime: count real tokens (the server's `/tokenize`)
+instead of chars/4, and treat a context-size rejection as a signal to fold memory and retry, not
+as a silent failure.

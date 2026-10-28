@@ -10,7 +10,7 @@ Kev Q4_K_M, 22.1 GB) and `./start-stack-qwen.sh` (Qwen3.5-9B with Kev Q8, 21.9 G
 
 ```bash
 KEV_CTX=4096 KEV_EXTRA="-np 1" ./start-kev.sh   # Kev-4B Q8_0 on :8080 (/v1/systemone)
-CHAT_EXTRA="-np 2" ./start-chat-qwen.sh          # Qwen3.5-9B + mmproj on :8081
+CHAT_EXTRA="-np 2 -kvu" ./start-chat-qwen.sh          # Qwen3.5-9B + mmproj on :8081
 ./start-breeze.sh                                # Breeze TTS 2 on :7860 (m8's fast flags)
 ./start-stt.sh                                   # Parakeet via m8py.stt_server on :8083 (CPU)
 ./vram.sh                                        # per-process VRAM, labelled by port

@@ -3,6 +3,6 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 KEV_CTX=4096 KEV_EXTRA="-np 1" ./start-kev.sh
-CHAT_EXTRA="-np 2" ./start-chat-qwen.sh
+CHAT_EXTRA="-np 2 -kvu" ./start-chat-qwen.sh
 ./start-breeze.sh
 ./start-stt.sh
