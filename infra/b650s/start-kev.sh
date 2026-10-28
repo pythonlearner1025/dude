@@ -18,10 +18,11 @@ case "$quant" in
 esac
 
 # systemone needs a whole question in one micro-batch; joint action+target choices
-# reached 644 tokens in combat and the default 512 rejected every call.
+# reached 644 tokens in combat and the default 512 rejected every call. 2048 needs a
+# 2 GB compute buffer, which does not fit beside Gemma and Breeze on the 3090 Ti.
 nohup "${LLAMA_SERVER:-$ROOT/llama.cpp/build/bin/llama-server}" \
     -m "$model" -ngl 99 -c "${KEV_CTX:-8192}" -fa on \
-    -ctk q8_0 -ctv q8_0 --cache-ram 0 -b 2048 -ub 2048 \
+    -ctk q8_0 -ctv q8_0 --cache-ram 0 -b 1024 -ub 1024 \
     --host 127.0.0.1 --port "${KEV_PORT:-8080}" ${KEV_EXTRA:-} \
     >>"$ROOT/logs/kev.log" 2>&1 &
 pid=$!
