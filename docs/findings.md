@@ -154,3 +154,22 @@ lines; tell the LLM exactly what the body did and can do ("you can't do X here; 
 give the player's imperative a fast path (map it to an offered action or answer honestly that it
 isn't possible); bias STT toward the mate's name and game terms; skip `look` unless the player
 asked.
+
+## 6. Back to m8's LLM: Gemma4-12B uncensored on 24 GB
+
+BreezeBlue publishes a single TTS model (Breeze-TTS-2, 3B); there is no smaller official variant
+(only community int8/int4/GGUF quantizations). Measured options for fitting Gemma4-12B:
+
+| Stack (+ Xorg/Sunshine 0.29 GB) | VRAM | Result |
+| --- | ---: | --- |
+| Kev Q8 + Gemma 12B (`-np 2`) + Breeze eager (no fast flags) | 22.07 GB idle | **OOM on the first TTS request**: the streaming path still builds its decoder wrappers lazily (fp32 copy of the codebook head), +0.4-0.6 GB |
+| **Kev Q4_K_M + Gemma 12B (`-np 2`) + Breeze fast (m8's flags)** | 22.10 GB idle, 22.16 GB peak during TTS | **fits**; this is m8's original stack except Kev's quantization |
+
+With that stack (warm): Breeze first audio ~140 ms (RTF ~0.6); Kev Q4 155 ms per decision
+(Q8: 141 ms — Q4 is not faster); Gemma first token 163-181 ms with prefix cache and 70 tok/s
+(Qwen-9B: ~45 ms and 120 tok/s); Gemma vision 0.74-0.91 s on the same frame (Qwen: 2.0 s).
+On the microbench prompt Gemma's lines were **one paragraph of ~30-40 words**, versus Qwen's
+two paragraphs of ~100 — the brevity instructions are followed much better. Kev Q4 and Q8 chose
+differently on the same 11-way prompt (`look` vs `shoot`, both at confidence ~0.1; the prompt
+ended with the player asking "What do you see over there?", so Q4's pick is arguably better).
+Launch: `infra/b650s/start-stack-gemma.sh` (and `start-stack-qwen.sh` for the fallback).
