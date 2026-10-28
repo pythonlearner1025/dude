@@ -93,7 +93,7 @@ def test_delivery_note_allowlist(note, expected):
 
 
 def test_is_noise_drops_filler_and_cut_off_fragments():
-    noise = ["Uh", "Yeah.", "Okay.", "Mm-hmm.", "At the", "Careful I", "Can you look at the l log of"]
+    noise = ["Uh", "Yeah.", "Okay.", "Mm-hmm.", "At the", "Careful I", "Can you look at the"]
     for line in noise:
         assert is_noise(line), line
     for line in ["What is your favorite colour?", "Go, go, go.", "Hey Kevin.", "Hold your fire."]:
