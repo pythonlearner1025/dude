@@ -12,7 +12,7 @@ import httpx
 import numpy as np
 from aiohttp import web
 
-from .brain import Brain, Event, Heard, Loaded, Saved
+from .brain import Brain, Event, Heard, Loaded, NewGame, Saved
 from .config import Config
 from .link import GameLink
 from .listen import Listener, Transcriber, decode_wav, remote_mic_app, resample, run_local
@@ -95,6 +95,8 @@ async def run(cfg: Config) -> Path:
                 item = Saved(str(msg.get("id", "")))
             elif kind == "loaded":
                 item = Loaded(str(msg.get("id", "")))
+            elif kind == "new_game":
+                item = NewGame(str(msg.get("level", "")))
             elif kind == "direct":
                 item = Event(
                     f"Game master: {msg.get('text', '')}",

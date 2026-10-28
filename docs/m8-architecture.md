@@ -20,7 +20,7 @@ at a time. This document is the reference the Python port (`m8py`) must match.
 ```
 mic (cpal) -> Listener: resample 16k -> Silero VAD (512-sample windows) -> segment + margins -> STT  --\
 console stdin / site box ------------------------------------------------------------------------------>  inputs channel -> Brain (single thread, blocking)
-game link reader: event/saved/loaded/direct ---------------------------------------------------------->        |
+game link reader: event/saved/loaded/new_game/direct ------------------------------------------------->        |
 game link reader: kind-3 dialogue audio -> STT (own thread) -> waits out clip length -> Event --------/        |
                                                                                                                 v
                                      Kev (systemone) calls, LLM stream -> sentences -> speech channel -> TTS thread -> kind-2 PCM frames -> game
@@ -32,7 +32,8 @@ fully voiced). `is_speaking = now < until + 500 ms`. `quiet_from = until` iff no
 
 ## The brain loop (`brain.rs`)
 
-Inputs: `Heard(text)`, `Event{text, react}`, `Saved(id)`, `Loaded(id)`, `Summary{memory_gen, folded, text}`.
+Inputs: `Heard(text)`, `Event{text, react}`, `Saved(id)`, `Loaded(id)`, `NewGame(level)`,
+`Summary{memory_gen, folded, text}`.
 
 - Poll every 1 s. If nothing for 45 s and not speaking, not in combat, state non-null → synthetic
   event "It's been quiet for a while." (react) — and that is a "quiet" safe point for folding.
@@ -79,6 +80,9 @@ rewrites previous summary + folded lines as a ≤250-word third-person past-tens
 Applied only if memory generation unchanged. Saves: `saves.json` keeps up to 50
 `(save_id, {summary, feed})`; `loaded` restores the matching snapshot (else clears memory),
 interrupts speech, sends `stop_audio`.
+`new_game` clears the feed and summary, discards every checkpoint snapshot in memory and in
+`saves.json`, advances the memory generation so an in-flight summary is dropped, interrupts
+speech, sends `stop_audio`, and records the level's reset in the trace.
 
 ## Voice (`speak.rs`)
 Per sentence: send `{"type":"say","text"}` to game, POST multipart (text, instruction?,
@@ -99,7 +103,8 @@ Frame `[u8 kind][u32 BE len][payload]`. 1 = JSON both ways; 2 = mate PCM s16le t
 3 = dialogue to m8 `[u16 BE jlen][json{speaker,radio,react,sample_rate}][s16le]`;
 4 = view to m8 `[u16 BE jlen][json{width,height,spots[{id,x,y,metres}]}][RGB rows]`.
 Game→m8 JSON: `state` (replaces latest), `event{text,react}`, `saved{id}`, `loaded{id}`,
-`direct{text}` (→ "Game master: …"), `mic{muted}`, `settings{speech_cooldown}`.
+`new_game{level}` (fresh level: clear all memory and checkpoint snapshots), `direct{text}`
+(→ "Game master: …"), `mic{muted}`, `settings{speech_cooldown}`.
 m8→game: `hello{name,sample_rate}` on connect, `action{action,option?}`, `say`, `heard`,
 `view`, `stop_audio`, `audio_end`.
 

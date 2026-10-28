@@ -162,6 +162,11 @@ class GameLink:
                     self.speech_cooldown = max(0.0, float(msg["speech_cooldown"]))
             case "mic":
                 self.mic_muted = bool(msg.get("muted", False))
+            case "new_game":
+                # Do not expose the previous level while the fresh map is still loading.
+                self.state = None
+                msg["_received_at"] = received_at
+                await self.events.put(msg)
             case "event" | "saved" | "loaded" | "direct":
                 msg["_received_at"] = received_at
                 await self.events.put(msg)
