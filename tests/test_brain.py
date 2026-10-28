@@ -64,7 +64,7 @@ async def test_prompt_window_situation_and_messages(cfg, tmp_path):
     messages = b.messages()
     assert messages[0]["role"] == "system"
     assert messages[0]["content"].startswith("You are Kevin beside John in Halo.")
-    assert "may only describe what he is actually doing" in messages[0]["content"]
+    assert "Never narrate or describe his actions" in messages[0]["content"]
     assert messages[-1]["role"] == "user" and messages[-1]["content"].endswith(
         "John: newest question"
     )
