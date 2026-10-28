@@ -20,7 +20,8 @@ class Recognizer:
             # Hotwords need beam search and a BPE vocabulary. Parakeet ships only tokens.txt,
             # so score each piece by its id (earlier merges first).
             work = Path(tempfile.mkdtemp(prefix="stt-hotwords-"))
-            pieces = (line.rsplit(" ", 1) for line in (directory / "tokens.txt").read_text().splitlines())
+            lines = (directory / "tokens.txt").read_text().splitlines()
+            pieces = (line.rsplit(" ", 1) for line in lines)
             (work / "bpe.vocab").write_text("".join(f"{p}\t{-int(i)}\n" for p, i in pieces))
             (work / "hotwords.txt").write_text("".join(f"{word}\n" for word in hotwords))
             options = {
