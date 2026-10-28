@@ -91,3 +91,66 @@ the live Halo sessions will add more.
 - An A/B worth running: m8's original Gemma4-12B with Kev Q4_K_M (≈ −1.4 GB) fits the same
   budget as Qwen-9B + Kev Q8 and may follow the brevity instructions better.
 
+
+## 5. Live playtest: Halo CE in the browser on a MacBook, models on b650s
+
+Session `1793146655` (26 min; a10 training then b30 "The Silent Cartographer" beach and Warthog),
+analysed with `tools/analyze_session.py`. Player on a MacBook (browser build, in-page mic with
+echo cancellation), m8py + models on b650s over Tailscale (LAN, ~4 ms).
+
+| Metric | Value |
+| --- | --- |
+| Turns | 172 (64 player lines, 108 game-event batches) |
+| Mate lines | 70, **37 cut off** (player talked over him, or a newer turn replaced the line) |
+| Words per mate line | median 96, max 213; almost every line is two paragraphs |
+| Lines opening `[yelling …]` | **56 / 70** (copied from the persona's own example) |
+| Game-event turns that spoke | 6 / 108 (6%); 76 of 146 Kev decisions fell in the speech cooldown |
+| Actions | shoot 63, nothing 45, follow 11, look 9, go_aim 7, rush 4, go_to 3, search_vehicles 2 |
+| Errors | none; VRAM 21.9-22.2 GB throughout |
+
+| Latency (ms) | p50 | p90 | max | n |
+| --- | ---: | ---: | ---: | ---: |
+| Player speech end → first mate audio | **1 006** | 2 230 | 8 045 | 64 |
+| Game event → first mate audio | 3 323 | 6 020 | 7 023 | 6 |
+| Input queue wait | 0 | 2 461 | 8 294 | 172 |
+| STT | 62 | 108 | 191 | 64 |
+| Kev decision chain | 476 | 1 152 | 3 516 | 146 |
+| LLM first token / first sentence | 166 / 363 | 286 / 430 | 689 / 785 | 70 |
+| TTS first audio | 197 | 204 | 218 | 70 |
+| Vision call | 1 420 | 1 935 | 3 025 | 11 |
+
+What playing it actually felt like (from the transcript):
+
+1. **Says ≠ does.** The dialogue model narrates actions the body never takes. Asked to get in the
+   Warthog, Kevin said "I'm in, I'm in" and "[hops into the passenger seat]" for ~2 minutes
+   while Kev chose `go_to`, `follow`, `search_vehicles`; he got in only at the end. Asked to kill
+   the marine in the passenger seat (not an action the game offers), he described shooting
+   *himself*. m8 puts the chosen action in the feed before the LLM speaks, but nothing stops the
+   LLM from inventing others, and Kev never sees what the LLM promised. The persona's "what you
+   say you'll do, you do" is not enforced by anything.
+2. **Commands need repeating.** "Rush that portal" took 5 repetitions before Kev chose `rush`;
+   "get in" ~6. Imperatives from the player are scored like any other context, with no
+   "the player just told you to do X" priority, and with free-text targets ("portal") that match
+   no offered option.
+3. **Talking over a monologue.** With 15-30 s replies, the player interrupts constantly (37 / 70
+   lines cut). Barge-in works technically; conversationally it turns every exchange into
+   interrupting a speech.
+4. **Catchphrase loops.** "Fuck me sideways" and "you damn block of concrete" each ~15 times;
+   whole sentences repeated verbatim ("Finally! Don't tell me you got bored of running on
+   foot…" ×4, "You heard me, Crush that portal before they swarm you!" ×3). The model imitates
+   its own recent turns in the feed.
+5. **Event confusion.** In the a10 training, the crewman's instructions to the Chief ("please look
+   around the room") made Kev pick `look` for Kevin (9 vision calls at ~1.4 s each).
+6. **STT on names.** "Kevin" → "Heaven", "man" → "Matt"; the mate then replied to the
+   mis-transcription ("Heaven took that seat like a damn thief!"). Name/term biasing is needed.
+7. **What worked:** voice and timing of the first audio (~1 s) felt live; barge-in; vision
+   describing the scene accurately; and one genuinely good emergent moment — the player shot Kevin
+   by accident, Kevin brought it up later, and held a grudge when the player apologised. That is
+   the relationship texture worth designing for.
+
+Cheap fixes these point to (not yet applied, to keep the m8 baseline): stop the LLM at the first
+paragraph and cap tokens; ban the persona example strings and block n-grams from the last ~20
+lines; tell the LLM exactly what the body did and can do ("you can't do X here; say so");
+give the player's imperative a fast path (map it to an offered action or answer honestly that it
+isn't possible); bias STT toward the mate's name and game terms; skip `look` unless the player
+asked.
