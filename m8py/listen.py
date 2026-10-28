@@ -263,7 +263,14 @@ async def remote_mic_app(
                     pass
         return ws
 
+    async def game(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse(max_msg_size=64 * 1024 * 1024)
+        await ws.prepare(request)
+        await link.websocket_connected(request, ws)
+        return ws
+
     app.router.add_get("/mic", mic)
+    app.router.add_get("/game", game)
     return app
 
 

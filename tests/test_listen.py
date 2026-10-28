@@ -1,10 +1,13 @@
 import asyncio
 import builtins
+import json
+import struct
 
 import numpy as np
 import pytest
 from aiohttp import ClientSession, web
 
+from m8py.link import KIND_JSON, GameLink, frame
 from m8py.listen import Listener as RealListener
 from m8py.listen import remote_mic_app
 from m8py.speaking import Speaking
@@ -106,3 +109,40 @@ async def test_remote_websocket_barge_in_interrupts_speech(cfg, capsys):
     assert link.sent == [{"type": "stop_audio"}]
     assert listener.chunks == [(b"\x00\x00" * 512, False)]
     assert "[mic] barge-in" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_game_websocket_is_a_byte_stream_and_replaces_tcp(cfg):
+    events, hearing = asyncio.Queue(), asyncio.Queue()
+    link = GameLink({"type": "hello", "name": "K"}, events, hearing)
+    await link.start(0)
+    tcp_port = link.server.sockets[0].getsockname()[1]
+    tcp_reader, tcp_writer = await asyncio.open_connection("127.0.0.1", tcp_port)
+    await tcp_reader.readexactly(5)
+    await tcp_reader.readexactly(27)
+
+    runner = web.AppRunner(await remote_mic_app(Listener(), Speaking(), link, cfg))
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    one = frame(KIND_JSON, json.dumps({"type": "event", "text": "one"}).encode())
+    two = frame(KIND_JSON, json.dumps({"type": "event", "text": "two"}).encode())
+
+    async with ClientSession() as client:
+        async with client.ws_connect(f"http://127.0.0.1:{port}/game") as ws:
+            hello = await ws.receive_bytes()
+            assert json.loads(hello[5:])["type"] == "hello"
+            await ws.send_bytes(one[:3])
+            await ws.send_bytes(one[3:] + two)
+            assert (await asyncio.wait_for(events.get(), 1))["text"] == "one"
+            assert (await asyncio.wait_for(events.get(), 1))["text"] == "two"
+            await link.send_json({"type": "say", "text": "hi"})
+            packet = await ws.receive_bytes()
+            assert struct.unpack(">I", packet[1:5])[0] == len(packet) - 5
+            assert json.loads(packet[5:])["type"] == "say"
+            assert link.writer is None
+
+    tcp_writer.close()
+    await runner.cleanup()
+    await link.close()
