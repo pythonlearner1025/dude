@@ -20,7 +20,8 @@ from .validator import ActionStatus, Validator
 
 FEED_TOKENS, FEED_FOLDED_TO, FEED_MAX_TOKENS = 16_000, 12_000, 20_000
 QUIET, QUIET_EVENT, KEV_FEED_LINES, SAVES = 45.0, "It's been quiet for a while.", 20, 50
-REFLECT_INTERVAL, REFLECT_LOG_TOKENS, REFLECT_MAX_TOKENS = 15.0, 7_000, 512
+REFLECT_INTERVAL, REFLECT_LOG_TOKENS, REFLECT_MAX_TOKENS = 15.0, 7_000, 768
+REFLECT_THINK_TOKENS = 256  # unbudgeted thinking ran 1-2k tokens (12-27 s) and often never answered
 
 
 @dataclass(slots=True)
@@ -391,11 +392,14 @@ class Brain:
                 {
                     "role": "system",
                     "content": (
-                        "Maintain Kevin's durable orders and relationship memory. Review actual "
-                        "events and outcomes. Never send or propose a game action. Output JSON "
-                        "only "
-                        "with exactly: orders (the full replacement list of short imperative "
-                        "strings) and remember (new facts about the player or relationship)."
+                        "Maintain Kevin's durable orders and relationship memory. Orders are "
+                        "the standing instructions the player has given Kevin that still apply: "
+                        "keep the player's conditions and wording, add new ones, and drop ones "
+                        "the player cancelled or that are finished. Remember holds only facts "
+                        "about the player or the relationship, never what Kevin did. Never send "
+                        "or propose a game action. Output JSON only with exactly: orders (the "
+                        "full replacement list of short imperative strings) and remember (new "
+                        "facts, often none)."
                     ),
                 },
                 {
@@ -412,6 +416,7 @@ class Brain:
             "temperature": 0.3,
             "stream": False,
             "max_tokens": REFLECT_MAX_TOKENS,
+            "thinking_budget_tokens": REFLECT_THINK_TOKENS,
             "id_slot": 1,
             "chat_template_kwargs": {"enable_thinking": True},
             "response_format": {
