@@ -23,3 +23,10 @@ startup), then open `http://localhost:8000/?m8=ws://100.126.232.8:8091/game`. Th
 maps into the browser's storage by itself on the first visit (`?autoload=0` turns that off; see
 `docs/reports/halo-web-autoload.md`); turn the microphone on once, then Play. Only one game should be open
 at a time: the newest connection takes over the companion.
+
+The browser launcher lists the ten campaign levels; a click starts that level straight into
+gameplay. Opening cinematics are skipped through the engine's own skip wherever the level script
+allows it (`?set=HALO_SKIP_CINEMATICS=0` restores them), and a fresh level start sends m8py a
+`new_game` message that clears the mate's memory and stored checkpoint memories
+(`docs/reports/halo-levels-skip-reset.md`). `?perf=1` logs the game's frame times to the browser
+console (`docs/reports/halo-web-perf.md`).

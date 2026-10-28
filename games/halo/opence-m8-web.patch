@@ -1,3 +1,135 @@
+diff --git a/port/linux/README.md b/port/linux/README.md
+index 9dc7c289..02f1f996 100644
+--- a/port/linux/README.md
++++ b/port/linux/README.md
+@@ -377,6 +377,7 @@ the setting for one start of the game. It has priority over the file.
+ | `game.console_log` | `"important"` | `HALO_CONSOLE_LOG` | What the console shows on the screen. `"important"`: bans, players that the host drops for cheating, the reasons that the game refuses a command, and the asserts that stop the game. `"all"`: all the lines. `"none"`: only the asserts that stop the game. The output of a command always shows. `debug.txt` gets all the lines. |
+ | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
+ | `game.enhanced_animations` | `true` | `HALO_ENHANCED_ANIMATIONS` | `true`: the player bipeds' grenade throws keep their legs moving, blended by speed and direction (crouched throws stay crouched, throws in the air use the jump's legs), Warthog and Scorpion riders stay seated to throw and let go of the grips to throw and reload, and a player turns with the aim while throwing, as while meleeing. `false`: the original animations, which freeze the legs during a throw and stand a rider up. Only in config.toml, not in the menus. |
++| `game.skip_cinematics` | `true` | `HALO_SKIP_CINEMATICS` | Skip a cinematic automatically when its script makes it skippable. `false`: press Jump to skip it as usual. |
+ | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
+ | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
+ | `network.address` | `""` | `HALO_NET_ADDRESS` | The IPv4 address of this machine for system link. Refer to "Play on one computer". |
+diff --git a/port/linux/game/companion.c b/port/linux/game/companion.c
+index f81247de..70f0fb96 100644
+--- a/port/linux/game/companion.c
++++ b/port/linux/game/companion.c
+@@ -2506,6 +2506,22 @@ static void companion_send_save(
+ 	mate_link_send(json);
+ }
+ 
++/* A fresh map can finish loading before the link's reconnecting thread has
++connected. Keep this one transition until mate can receive it. */
++static char companion_new_game_level[32];
++
++static void companion_send_new_game(
++	void)
++{
++	char json[96];
++
++	if (!companion_new_game_level[0] || !mate_link_connected())
++		return;
++	snprintf(json, sizeof(json), "{\"type\":\"new_game\",\"level\":\"%s\"}", companion_new_game_level);
++	mate_link_send(json);
++	companion_new_game_level[0] = 0;
++}
++
+ /* a gain in DirectSound's millibels (as sound_dsound_xbox.c's
+ dsound_volume_from_gain, and above 1 too: his voice can be turned up past
+ the game's) */
+@@ -2749,6 +2765,18 @@ void companion_note_loaded(
+ 	companion_respawn_time = 0;
+ }
+ 
++void companion_note_new_game(
++	char const *level)
++{
++	short campaign_level = main_get_solo_level_from_name(level);
++
++	if (campaign_level == NONE)
++		return;
++	csstrncpy(companion_new_game_level, tag_name_strip_path(level), sizeof(companion_new_game_level) - 1);
++	companion_new_game_level[sizeof(companion_new_game_level) - 1] = 0;
++	companion_send_new_game();
++}
++
+ /* scripted dialogue beginning to play, for mate to hear: Cortana and the crew
+ on the radio (no source), and the cutscenes' (heard, not answered) */
+ void companion_note_sound(
+@@ -2837,6 +2865,7 @@ void companion_update(
+ 	struct unit_datum *player_unit;
+ 
+ 	mate_link_start();
++	companion_send_new_game();
+ 	if (game_engine_running() || network_game_distributed_client())
+ 		return;
+ 
+diff --git a/port/linux/game/companion.h b/port/linux/game/companion.h
+index aaa0b1fe..59a2a390 100644
+--- a/port/linux/game/companion.h
++++ b/port/linux/game/companion.h
+@@ -20,6 +20,9 @@ void companion_note_saved(
+ 	void);
+ void companion_note_loaded(
+ 	void);
++/* main.c: a campaign level was started without loading a save */
++void companion_note_new_game(
++	char const *level);
+ 
+ /* Kevin's eyes (d3d8_gl.c): whether mate asked for the player's view (once),
+ and the frame taken as it was shown, as RGB rows from the top, which goes to
+diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
+index ae4756bf..3303a93a 100644
+--- a/port/linux/src/d3d8_gl.c
++++ b/port/linux/src/d3d8_gl.c
+@@ -5815,6 +5815,19 @@ static void write_companion_view(struct render_target_entry *target)
+ 	unsigned long step = (width + 1023) / 1024;
+ 	unsigned long out_width, out_height, x, y, dx, dy;
+ 	unsigned char *pixels, *rgb;
++#ifdef HALO_WEB
++	static int perf_enabled = -1;
++	Uint64 perf_started = 0, perf_read = 0;
++
++	if (perf_enabled < 0)
++	{
++		const char *setting = getenv("HALO_PERF_LOG");
++
++		perf_enabled = setting && strcmp(setting, "0") != 0;
++	}
++	if (perf_enabled)
++		perf_started = SDL_GetTicksNS();
++#endif
+ 
+ 	if (!width || !height)
+ 		return;
+@@ -5826,6 +5839,10 @@ static void write_companion_view(struct render_target_entry *target)
+ 	{
+ 		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(target->target.texture, 0));
+ 		glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
++#ifdef HALO_WEB
++		if (perf_enabled)
++			perf_read = SDL_GetTicksNS();
++#endif
+ 		for (y = 0; y < out_height; y++)
+ 		{
+ 			for (x = 0; x < out_width; x++)
+@@ -5856,6 +5873,16 @@ static void write_companion_view(struct render_target_entry *target)
+ 			}
+ 		}
+ 		companion_view_taken(rgb, out_width, out_height);
++#ifdef HALO_WEB
++		if (perf_enabled)
++		{
++			Uint64 finished = SDL_GetTicksNS();
++
++			platform_log("halo-perf: companion view %lux%lu, read-back %.2f ms, total %.2f ms",
++				out_width, out_height, (double)(perf_read - perf_started) / 1000000.0,
++				(double)(finished - perf_started) / 1000000.0);
++		}
++#endif
+ 	}
+ 	free(pixels);
+ 	free(rgb);
 diff --git a/port/linux/src/mate_link.c b/port/linux/src/mate_link.c
 index f90105dc..763bb188 100644
 --- a/port/linux/src/mate_link.c
@@ -227,20 +359,35 @@ index f90105dc..763bb188 100644
  }
  
  void mate_link_set_radio(float radio)
+diff --git a/port/linux/src/port_config.c b/port/linux/src/port_config.c
+index 94342af9..6fa73e9c 100644
+--- a/port/linux/src/port_config.c
++++ b/port/linux/src/port_config.c
+@@ -313,6 +313,9 @@ static const struct config_setting config_settings[] =
+ 		"to throw and reload, and a player turns with the aim while throwing;\n"
+ 		"false: the original animations, which freeze the legs and stand a\n"
+ 		"rider up." },
++	{ "game.skip_cinematics", _config_boolean, "true", "HALO_SKIP_CINEMATICS", _environment_value, _platform_all,
++		"Skip a cinematic as soon as its script makes it skippable; false leaves\n"
++		"the stock jump-button skip." },
+ 	{ "game.custom_edition", _config_boolean, "true", "HALO_CUSTOM_EDITION", _environment_value, _platform_all,
+ 		"Load and run Halo Custom Edition maps (not those that need OpenSauce):\n"
+ 		"put them and Custom Edition's bitmaps.map, sounds.map and loc.map in\n"
 diff --git a/port/web/README.md b/port/web/README.md
-index d68820d2..c0f917cc 100644
+index d68820d2..771670f2 100644
 --- a/port/web/README.md
 +++ b/port/web/README.md
-@@ -123,6 +123,7 @@ For testing, the page's address takes:
+@@ -123,6 +123,8 @@ For testing, the page's address takes:
  | `?menu=<screen>` | Opens a menu screen (`debug.menu_open`). |
  | `?map=<level>` | Starts a level: `a10`, or `levels\test\bloodgulch\bloodgulch`. The page writes `init.txt` for it, and removes it at the next visit without `?map=`. |
  | `?play` | Starts the game at once (when the game data is there). |
 +| `?autoload=0` | Disables automatic import from `maps/manifest.json` when served on localhost. |
++| `?perf=1` | Logs FPS, p50/p95/p99 frame time and the longest frame every two seconds; companion views also log their read-back and total time. |
  
  ## Updates
  
 diff --git a/port/web/site/app.js b/port/web/site/app.js
-index 860b5869..69ce742d 100644
+index 860b5869..2ce7f93b 100644
 --- a/port/web/site/app.js
 +++ b/port/web/site/app.js
 @@ -33,6 +33,164 @@ const params = new URLSearchParams(location.search);
@@ -461,7 +608,38 @@ index 860b5869..69ce742d 100644
  function setImporting(importing) {
    for (const id of ['image-label', 'folder-label']) $(id).classList.toggle('disabled', importing);
    $('image-input').disabled = importing;
-@@ -589,6 +770,7 @@ async function play() {
+@@ -429,10 +610,22 @@ function canPlay() {
+ 
+ function updatePlay() {
+   $('play').disabled = !canPlay();
++  for (const button of document.querySelectorAll('[data-level]')) {
++    button.disabled = !checksPassed || !dataReady;
++  }
+   $('play-note').textContent = !checksPassed ? 'This browser cannot run the game (above).' :
+     !dataReady ? 'The game data is needed first.' : '';
+ }
+ 
++for (const button of document.querySelectorAll('[data-level]')) {
++  button.addEventListener('click', () => {
++    const url = new URL(location.href);
++    url.searchParams.set('map', button.dataset.level);
++    url.searchParams.set('play', '');
++    location.assign(url);
++  });
++}
++
+ // init.txt in the data folder: the console commands the game runs as it
+ // starts. ?map= writes one, and the page removes it on the next visit
+ // without ?map=, only if it wrote it.
+@@ -520,6 +713,7 @@ function gameArguments() {
+   for (const value of params.getAll('set')) {
+     if (/^[A-Z0-9_]+=/.test(value)) args.push('--' + value);
+   }
++  if (params.get('perf') === '1') args.push('--HALO_PERF_LOG=1');
+   if (params.has('menu')) args.push('--HALO_MENU_OPEN=' + params.get('menu'));
+   // internet play's brokers (port/linux/src/p2p_signal.c), if not its own
+   const brokers = (params.get('brokers') || '').split(',').filter((url) => /^wss?:\/\/[^,\s]+$/.test(url));
+@@ -589,6 +783,7 @@ async function play() {
      const options = {
        canvas,
        arguments: gameArguments(),
@@ -469,7 +647,7 @@ index 860b5869..69ce742d 100644
        print: (text) => { logLine(text); console.log(text); },
        printErr: (text) => {
          logLine(text);
-@@ -713,8 +895,12 @@ document.addEventListener('visibilitychange', async () => {
+@@ -713,8 +908,12 @@ document.addEventListener('visibilitychange', async () => {
      $('checks-note').textContent = 'Desktop Chrome, Edge and Firefox run the game; Safari 17 or later may.';
      $('checks-note').hidden = false;
    }
@@ -484,7 +662,7 @@ index 860b5869..69ce742d 100644
    if (/^[0-9a-f]{32}$/.test(params.get('room') || '')) await joinRoom(params.get('room'));
    if (params.has('play')) play();
 diff --git a/port/web/site/index.html b/port/web/site/index.html
-index 1f1b8bc9..bb5c5007 100644
+index 1f1b8bc9..936014ec 100644
 --- a/port/web/site/index.html
 +++ b/port/web/site/index.html
 @@ -43,7 +43,20 @@
@@ -509,8 +687,32 @@ index 1f1b8bc9..bb5c5007 100644
    </section>
  
    <section class="panel" id="room-panel" aria-labelledby="room-title">
+@@ -65,6 +78,23 @@
+     <p id="play-note" class="note"></p>
+   </div>
+ 
++  <section class="panel" id="levels-panel" aria-labelledby="levels-title">
++    <h2 id="levels-title">Campaign levels</h2>
++    <div class="level-grid">
++      <button data-level="a10" disabled><strong>Pillar of Autumn</strong><span>a10</span></button>
++      <button data-level="a30" disabled><strong>Halo</strong><span>a30</span></button>
++      <button data-level="a50" disabled><strong>Truth and Reconciliation</strong><span>a50</span></button>
++      <button data-level="b30" disabled><strong>The Silent Cartographer</strong><span>b30</span></button>
++      <button data-level="b40" disabled><strong>Assault on the Control Room</strong><span>b40</span></button>
++      <button data-level="c10" disabled><strong>343 Guilty Spark</strong><span>c10</span></button>
++      <button data-level="c20" disabled><strong>The Library</strong><span>c20</span></button>
++      <button data-level="c40" disabled><strong>Two Betrayals</strong><span>c40</span></button>
++      <button data-level="d20" disabled><strong>Keyes</strong><span>d20</span></button>
++      <button data-level="d40" disabled><strong>The Maw</strong><span>d40</span></button>
++    </div>
++    <p class="note">Choose a level to start it immediately.</p>
++  </section>
++
+   <details class="panel" id="settings-panel">
+     <summary>Settings and data</summary>
+     <p id="storage-status" class="note"></p>
 diff --git a/port/web/site/style.css b/port/web/site/style.css
-index e7c696a1..9a8fb4be 100644
+index e7c696a1..97031dbe 100644
 --- a/port/web/site/style.css
 +++ b/port/web/site/style.css
 @@ -100,6 +100,14 @@ details.panel[open] summary { margin-bottom: 12px; }
@@ -528,6 +730,19 @@ index e7c696a1..9a8fb4be 100644
  
  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
  
+@@ -130,6 +138,12 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad)
+ .play-row { margin: 24px 0; }
+ .play-row .primary { min-width: 200px; min-height: 52px; font-size: 18px; }
+ 
++.level-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
++.level-grid button { min-height: 58px; align-items: flex-start; flex-direction: column; text-align: left; }
++.level-grid button strong { line-height: 1.2; }
++.level-grid button span { color: var(--muted); font: 12px/1 ui-monospace, monospace; }
++@media (max-width: 520px) { .level-grid { grid-template-columns: 1fr; } }
++
+ .progress { margin-top: 12px; }
+ .progress-bar { height: 8px; border-radius: 4px; background: #1d2a3e; overflow: hidden; }
+ .progress-bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 diff --git a/port/web/site/xiso-worker.js b/port/web/site/xiso-worker.js
 index 4aaaa49f..02ce66fe 100644
 --- a/port/web/site/xiso-worker.js
@@ -690,6 +905,78 @@ index 9425c041..14beb61b 100644
    // internet play's WebRTC connections (port/web/src/web_p2p.c), which the
    // page makes (port/web/site/p2p.js, Module.haloP2P): a command, the
    // connection, and a copy of its text or packet, freed here
+diff --git a/port/web/src/web_main.c b/port/web/src/web_main.c
+index d6d0f910..4d4f9c35 100644
+--- a/port/web/src/web_main.c
++++ b/port/web/src/web_main.c
+@@ -46,6 +46,59 @@ size_t emscripten_get_heap_size(void)
+ 
+ volatile int32_t web_shared[WEB_SHARED_WORDS];
+ 
++static int compare_frame_time(const void *left, const void *right)
++{
++	double a = *(const double *)left;
++	double b = *(const double *)right;
++
++	return a < b ? -1 : a > b;
++}
++
++static void web_perf_frame(void)
++{
++	static int enabled = -1;
++	static double previous;
++	static double period_start;
++	static double times[512];
++	static unsigned long count;
++	double now;
++
++	if (enabled < 0)
++	{
++		const char *setting = getenv("HALO_PERF_LOG");
++
++		enabled = setting && strcmp(setting, "0") != 0;
++	}
++	if (!enabled)
++		return;
++	now = emscripten_get_now();
++	if (!previous)
++	{
++		previous = period_start = now;
++		return;
++	}
++	if (count < sizeof(times) / sizeof(times[0]))
++		times[count++] = now - previous;
++	previous = now;
++	if (now - period_start >= 2000.0 && count)
++	{
++		double elapsed = now - period_start;
++		double longest;
++		unsigned long p50, p95, p99;
++
++		qsort(times, count, sizeof(times[0]), compare_frame_time);
++		p50 = (count * 50 + 99) / 100 - 1;
++		p95 = (count * 95 + 99) / 100 - 1;
++		p99 = (count * 99 + 99) / 100 - 1;
++		longest = times[count - 1];
++		fprintf(stderr,
++			"halo-perf: %.2f fps, frame ms p50 %.2f p95 %.2f p99 %.2f, longest %.2f (%lu frames)\n",
++			(double)count * 1000.0 / elapsed, times[p50], times[p95], times[p99], longest, count);
++		count = 0;
++		period_start = now;
++	}
++}
++
+ EMSCRIPTEN_KEEPALIVE volatile int32_t *web_state(void)
+ {
+ 	return web_shared;
+@@ -54,6 +107,7 @@ EMSCRIPTEN_KEEPALIVE volatile int32_t *web_state(void)
+ void web_frame_shown(void)
+ {
+ 	__atomic_add_fetch(&web_shared[_web_frames_shown], 1, __ATOMIC_RELAXED);
++	web_perf_frame();
+ }
+ 
+ /* ---------- start */
 diff --git a/port/web/tests/xiso.test.js b/port/web/tests/xiso.test.js
 index 5d22e1cd..9f854866 100644
 --- a/port/web/tests/xiso.test.js
@@ -723,6 +1010,156 @@ index 5d22e1cd..9f854866 100644
 +    global.fetch = previousFetch;
 +  }
 +});
+diff --git a/source/cutscene/cinematics.c b/source/cutscene/cinematics.c
+index ab5c78ae..60569b3a 100644
+--- a/source/cutscene/cinematics.c
++++ b/source/cutscene/cinematics.c
+@@ -66,6 +66,7 @@ symbols in this file:
+ #include "interface/hud_definitions.h"
+ #include "interface/ui_widget.h"
+ #include "items/projectiles.h"
++#include "main/main.h"
+ #include "rasterizer/rasterizer.h"
+ #include "rasterizer/rasterizer_cinematics.h"
+ #include "render/render.h"
+@@ -76,6 +77,9 @@ symbols in this file:
+ #include "text/text_group.h"
+ #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+ 
++/* port_config.c's */
++int config_boolean(const char *name);
++
+ /* ---------- constants */
+ 
+ enum
+@@ -124,6 +128,9 @@ typedef char verify_hud_global_default_title_bounds_offset[
+ /* ---------- globals */
+ 
+ struct cinematic_global_data *cinematic_globals = NULL;
++/* port: not in the reverted game state, so one automatic skip request cannot
++be restored and requested again. */
++static boolean cinematic_auto_skip_requested;
+ 
+ /* ---------- public code */
+ 
+@@ -151,6 +158,7 @@ void cinematic_dispose(
+ void cinematic_initialize_for_new_map(
+ 	void)
+ {
++	cinematic_auto_skip_requested = FALSE;
+ 	csmemset(cinematic_globals, 0, sizeof(*cinematic_globals));
+ 	csmemset(
+ 		cinematic_globals->queued_titles,
+@@ -163,6 +171,7 @@ void cinematic_initialize_for_new_map(
+ void cinematic_skip_start(
+ 	void)
+ {
++	cinematic_auto_skip_requested = FALSE;
+ 	cinematic_globals->can_be_skipped = TRUE;
+ 
+ 	return;
+@@ -171,6 +180,7 @@ void cinematic_skip_start(
+ void cinematic_skip_stop(
+ 	void)
+ {
++	cinematic_auto_skip_requested = FALSE;
+ 	cinematic_globals->can_be_skipped = FALSE;
+ 
+ 	return;
+@@ -296,6 +306,16 @@ void cinematic_set_title_delayed(
+ void cinematic_render(
+ 	void)
+ {
++	/* port: use the jump button's deferred revert path at its first safe
++	opportunity. A script can make the cutscene skippable while the checkpoint
++	that skip restores is still being written. */
++	if (!cinematic_auto_skip_requested && cinematic_globals->can_be_skipped &&
++		config_boolean("game.skip_cinematics") &&
++		game_state_port_saved_game_valid() && !main_saving_map())
++	{
++		cinematic_auto_skip_requested = TRUE;
++		main_skip_cinematic();
++	}
+ 	if ((cinematic_globals->show_letterbox ||
+ 		cinematic_globals->letterbox_amount > 0.0f) &&
+ 		!ui_widgets_active())
+diff --git a/source/hs/hs.c b/source/hs/hs.c
+index c93adb8f..6664bb4e 100644
+--- a/source/hs/hs.c
++++ b/source/hs/hs.c
+@@ -14966,7 +14966,8 @@ HS_EVALUATE_RETURN_BOOLEAN_NO_ARGUMENTS(player_control_action_test_move_relative
+ /* port: in network co-op, also for the players the scripts can't name (coop_scripts.c) */
+ HS_EVALUATE_VOID_FROM_ARGUMENTS(player_add_equipment_evaluate, struct hs_arguments_long_word_boolean, (coop_scripts_player_add_equipment(arguments->value0, arguments->value1, arguments->value2)))
+ HS_EVALUATE_VOID_FROM_ARGUMENTS(debug_player_teleport_evaluate, struct hs_arguments_short_word, (debug_player_teleport(arguments->value0, arguments->value1)))
+-HS_EVALUATE_VOID_STRING(main_set_map_name_evaluate, main_set_map_name)
++/* port: the console command starts the named level afresh. */
++HS_EVALUATE_VOID_STRING(main_set_map_name_evaluate, main_set_fresh_map_name)
+ HS_EVALUATE_VOID_STRING(main_set_multiplayer_map_name_evaluate, main_set_multiplayer_map_name)
+ HS_EVALUATE_VOID_UNSIGNED_SHORT(main_set_difficulty_evaluate, main_set_difficulty)
+ /* port: a campaign script still switches, and so does a player walking
+diff --git a/source/main/main.c b/source/main/main.c
+index f6ce6338..245620ee 100644
+--- a/source/main/main.c
++++ b/source/main/main.c
+@@ -382,6 +382,7 @@ symbols in this file:
+ #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+ #include "network_voice.h" /* port: port/linux/game/network_voice.c */
+ #include "map_share.h" /* port: port/linux/game/map_share.c */
++#include "companion.h" /* port: port/linux/game/companion.c */
+ #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
+ #ifdef HALO_PROFILE
+ #include "profile_trace.h" /* port: port/linux/src/profile_trace.c */
+@@ -1464,6 +1465,8 @@ boolean main_menu_is_loaded(
+ static void main_new_map(
+ 	struct game_options *options)
+ {
++	boolean fresh_game = !main_globals.allow_persistent_storage;
++
+ 	input_flush();
+ 	if (game_load(options))
+ 	{
+@@ -1500,6 +1503,8 @@ static void main_new_map(
+ 
+ 	if (main_globals.allow_persistent_storage)
+ 		game_state_try_and_load_from_persistent_storage();
++	else if (fresh_game)
++		companion_note_new_game(options->map_name);
+ 	ui_widgets_disable_pause_game(30);
+ 
+ 	return;
+@@ -2385,6 +2390,16 @@ void main_set_map_name(
+ 	return;
+ }
+ 
++/* port: init.txt and the developer console use map_name to start a level
++afresh; the campaign menus call main_set_map_name directly when Continue or
++Load Game should take persistent storage. */
++void main_set_fresh_map_name(
++	char const *map_name)
++{
++	main_set_map_name(map_name);
++	main_disallow_persistent_storage();
++}
++
+ static void main_exit(
+ 	void)
+ {
+diff --git a/source/main/main.h b/source/main/main.h
+index a6159e0d..36697fac 100644
+--- a/source/main/main.h
++++ b/source/main/main.h
+@@ -43,6 +43,11 @@ void main_defer_map_map_change(
+ char *main_get_map_name(
+ 	void);
+ 
++/* port: the console's map_name starts a level rather than continuing its
++saved game. */
++void main_set_fresh_map_name(
++	char const *map_name);
++
+ char *main_get_multiplayer_map_name(
+ 	void);
+ 
 diff --git a/tools/make_maps_manifest.py b/tools/make_maps_manifest.py
 new file mode 100755
 index 00000000..6602d0f5
