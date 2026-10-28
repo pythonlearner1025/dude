@@ -17,6 +17,7 @@ cd "$DUDE"
 nohup "$python" -m m8py.stt_server \
     "${PARAKEET_MODEL:-$ROOT/models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8}" \
     "${STT_PORT:-8083}" \
+    --hotword "${STT_HOTWORD:-Kevin}" \
     >>"$ROOT/logs/stt.log" 2>&1 &
 pid=$!
 write_pidfile "$pid" "$pidfile"
