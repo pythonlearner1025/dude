@@ -227,11 +227,23 @@ index f90105dc..763bb188 100644
  }
  
  void mate_link_set_radio(float radio)
+diff --git a/port/web/README.md b/port/web/README.md
+index d68820d2..c0f917cc 100644
+--- a/port/web/README.md
++++ b/port/web/README.md
+@@ -123,6 +123,7 @@ For testing, the page's address takes:
+ | `?menu=<screen>` | Opens a menu screen (`debug.menu_open`). |
+ | `?map=<level>` | Starts a level: `a10`, or `levels\test\bloodgulch\bloodgulch`. The page writes `init.txt` for it, and removes it at the next visit without `?map=`. |
+ | `?play` | Starts the game at once (when the game data is there). |
++| `?autoload=0` | Disables automatic import from `maps/manifest.json` when served on localhost. |
+ 
+ ## Updates
+ 
 diff --git a/port/web/site/app.js b/port/web/site/app.js
-index 860b5869..cde2da22 100644
+index 860b5869..69ce742d 100644
 --- a/port/web/site/app.js
 +++ b/port/web/site/app.js
-@@ -33,6 +33,148 @@ const params = new URLSearchParams(location.search);
+@@ -33,6 +33,164 @@ const params = new URLSearchParams(location.search);
  const WEB_MEMORY_BYTES = 0x88000000;
  const MAXIMUM_LOG_LINES = 20000;
  
@@ -286,6 +298,7 @@ index 860b5869..cde2da22 100644
 +let micPosition = 0;
 +let micLastSample = 0;
 +let micFrame = [];
++let micStarting = false;
 +
 +function setMicStatus(text) { $('mic-status').textContent = text; }
 +
@@ -339,6 +352,9 @@ index 860b5869..cde2da22 100644
 +}
 +
 +async function startMic() {
++  if (micEnabled || micStarting) return;
++  micStarting = true;
++  $('mic-toggle').disabled = true;
 +  saveLinkInputs(false);
 +  try {
 +    micStream = await navigator.mediaDevices.getUserMedia({ audio: {
@@ -359,6 +375,9 @@ index 860b5869..cde2da22 100644
 +    connectMic();
 +  } catch (error) {
 +    setMicStatus('Unavailable: ' + (error.message || error));
++  } finally {
++    micStarting = false;
++    $('mic-toggle').disabled = false;
 +  }
 +}
 +
@@ -377,10 +396,72 @@ index 860b5869..cde2da22 100644
 +
 +$('mic-toggle').addEventListener('click', () => micEnabled ? stopMic() : startMic());
 +
++async function startGrantedMic() {
++  if (!navigator.permissions || !navigator.permissions.query) return;
++  try {
++    if ((await navigator.permissions.query({ name: 'microphone' })).state === 'granted') await startMic();
++  } catch {
++    // unsupported permission name: leave the button for the player
++  }
++}
++
  // ---------- the log: the game's output, for the player to send
  
  const log = [];
-@@ -589,6 +731,7 @@ async function play() {
+@@ -249,11 +407,11 @@ async function refreshStorage() {
+   $('persist').disabled = persisted;
+ }
+ 
+-function importData(message) {
++function importData(message, automatic = false) {
+   const worker = new Worker('xiso-worker.js');
+   $('import-progress').hidden = false;
+   $('import-bar').style.width = '0';
+-  $('import-text').textContent = 'Reading…';
++  $('import-text').textContent = automatic ? 'Loading game data from this computer…' : 'Reading…';
+   setImporting(true);
+   // (asked before the copy: the maps are 2 GB the browser should not drop)
+   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+@@ -261,7 +419,9 @@ function importData(message) {
+     const data = event.data;
+     if (data.type === 'progress') {
+       $('import-bar').style.width = (100 * data.done / data.total).toFixed(1) + '%';
+-      $('import-text').textContent = `Copying ${data.file}: ${formatBytes(data.done)} of ${formatBytes(data.total)}`;
++      $('import-text').textContent = automatic ?
++        `Loading game data from this computer… ${data.fileNumber}/${data.fileCount}, ${formatBytes(data.done)}` :
++        `Copying ${data.file}: ${formatBytes(data.done)} of ${formatBytes(data.total)}`;
+       return;
+     }
+     worker.terminate();
+@@ -283,6 +443,27 @@ function importData(message) {
+   worker.postMessage(message);
+ }
+ 
++async function autoImportData() {
++  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
++  if (!local || params.get('autoload') === '0' || dataReady) return;
++  let response;
++  try {
++    response = await fetch('maps/manifest.json', { cache: 'no-store' });
++  } catch {
++    return;
++  }
++  if (response.status === 404) return;
++  if (!response.ok) {
++    logLine(`automatic import: manifest HTTP ${response.status}`);
++    return;
++  }
++  try {
++    importData({ type: 'remote', files: await response.json() }, true);
++  } catch (error) {
++    logLine('automatic import: ' + (error.message || error));
++  }
++}
++
+ function setImporting(importing) {
+   for (const id of ['image-label', 'folder-label']) $(id).classList.toggle('disabled', importing);
+   $('image-input').disabled = importing;
+@@ -589,6 +770,7 @@ async function play() {
      const options = {
        canvas,
        arguments: gameArguments(),
@@ -388,14 +469,33 @@ index 860b5869..cde2da22 100644
        print: (text) => { logLine(text); console.log(text); },
        printErr: (text) => {
          logLine(text);
+@@ -713,8 +895,12 @@ document.addEventListener('visibilitychange', async () => {
+     $('checks-note').textContent = 'Desktop Chrome, Edge and Firefox run the game; Safari 17 or later may.';
+     $('checks-note').hidden = false;
+   }
+-  if (results.opfs === 'good') await refreshData();
++  if (results.opfs === 'good') {
++    await refreshData();
++    await autoImportData();
++  }
+   else updatePlay();
++  startGrantedMic();
+   checkForUpdate();
+   if (/^[0-9a-f]{32}$/.test(params.get('room') || '')) await joinRoom(params.get('room'));
+   if (params.has('play')) play();
 diff --git a/port/web/site/index.html b/port/web/site/index.html
-index 1f1b8bc9..f2b1c0d3 100644
+index 1f1b8bc9..bb5c5007 100644
 --- a/port/web/site/index.html
 +++ b/port/web/site/index.html
-@@ -46,6 +46,18 @@
-       Xbox) into this browser's storage for this site. Nothing is uploaded, and the site serves no game data.</p>
-   </section>
- 
+@@ -43,7 +43,20 @@
+       <p id="import-text" class="note"></p>
+     </div>
+     <p class="note">The maps are copied out of your own disc image (an .iso of Halo: Combat Evolved for the
+-      Xbox) into this browser's storage for this site. Nothing is uploaded, and the site serves no game data.</p>
++      Xbox) into this browser's storage for this site. Nothing is uploaded. A local package can copy maps placed
++      beside it automatically.</p>
++  </section>
++
 +  <section class="panel" id="companion-panel" aria-labelledby="companion-title">
 +    <h2 id="companion-title">Kevin (m8 companion)</h2>
 +    <label class="field">Game link <input id="m8-url" type="url" spellcheck="false"></label>
@@ -406,11 +506,9 @@ index 1f1b8bc9..f2b1c0d3 100644
 +      <meter id="mic-level" min="0" max="1" value="0" aria-label="Microphone level"></meter>
 +    </div>
 +    <p class="note">The browser removes echo, noise and level differences before sending your microphone to m8.</p>
-+  </section>
-+
+   </section>
+ 
    <section class="panel" id="room-panel" aria-labelledby="room-title">
-     <h2 id="room-title">Play together</h2>
-     <p id="room-status" class="status">Play system link with friends in their browsers: create a room and send them
 diff --git a/port/web/site/style.css b/port/web/site/style.css
 index e7c696a1..9a8fb4be 100644
 --- a/port/web/site/style.css
@@ -430,6 +528,92 @@ index e7c696a1..9a8fb4be 100644
  
  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
  
+diff --git a/port/web/site/xiso-worker.js b/port/web/site/xiso-worker.js
+index 4aaaa49f..02ce66fe 100644
+--- a/port/web/site/xiso-worker.js
++++ b/port/web/site/xiso-worker.js
+@@ -25,9 +25,10 @@ Each map is checked as the game checks it when it loads it (cache_files.c):
+ "head" and "foot" signatures, the Xbox's cache version, and the build of a
+ retail disc (01.10.12.2276) or of this decompilation's (01.01.14.2342).
+ 
+-Messages from the page: { type: 'image', file } or { type: 'folder', files }
+-(a maps folder's File objects). To the page: { type: 'progress', file, done,
+-total }, then { type: 'done', files, bytes } or { type: 'error', message }.
++Messages from the page: { type: 'image', file }, { type: 'folder', files }
++(a maps folder's File objects), or { type: 'remote', files } (a same-origin
++manifest). To the page: { type: 'progress', file, fileNumber, fileCount,
++done, total }, then { type: 'done', files, bytes } or { type: 'error', message }.
+ */
+ 
+ 'use strict';
+@@ -178,6 +179,33 @@ async function folderFiles(list) {
+   return checkedFiles(list.map((file) => ({ name: file.name, size: file.size, read: (at, size) => readAt(file, at, size) })));
+ }
+ 
++async function remoteFiles(list) {
++  if (!Array.isArray(list) || list.length > MAXIMUM_ENTRIES) throw new Error('The maps manifest is invalid.');
++  const names = new Set();
++  const candidates = list.map((entry) => {
++    if (!entry || !plainName(entry.name) || !Number.isSafeInteger(entry.size) || entry.size < 0 ||
++        names.has(entry.name.toLowerCase())) {
++      throw new Error('The maps manifest is invalid.');
++    }
++    names.add(entry.name.toLowerCase());
++    return {
++      name: entry.name,
++      size: entry.size,
++      read: async (at, size) => {
++        const end = Math.min(at + size, entry.size);
++        if (at < 0 || at >= end) return new Uint8Array(0);
++        const response = await fetch(`maps/${encodeURIComponent(entry.name)}`, {
++          headers: { Range: `bytes=${at}-${end - 1}` },
++          cache: 'no-store',
++        });
++        if (response.status !== 206) throw new Error(`Could not read ${entry.name} in parts (HTTP ${response.status}).`);
++        return new Uint8Array(await response.arrayBuffer());
++      },
++    };
++  });
++  return checkedFiles(candidates);
++}
++
+ async function writeFile(directory, source, onChunk) {
+   const handle = await directory.getFileHandle(source.name, { create: true });
+   const access = await handle.createSyncAccessHandle();
+@@ -218,13 +246,14 @@ async function copy(files) {
+   const directory = await storage.getDirectoryHandle('maps', { create: true });
+   let done = 0;
+   let lastReport = 0;
+-  for (const entry of files) {
++  for (let index = 0; index < files.length; index++) {
++    const entry = files[index];
+     await writeFile(directory, entry, (count) => {
+       done += count;
+       const now = Date.now();
+       if (now - lastReport > 100 || done === total) {
+         lastReport = now;
+-        postMessage({ type: 'progress', file: entry.name, done, total });
++        postMessage({ type: 'progress', file: entry.name, fileNumber: index + 1, fileCount: files.length, done, total });
+       }
+     });
+   }
+@@ -240,7 +269,8 @@ async function copy(files) {
+ if (typeof onmessage !== 'undefined' || typeof WorkerGlobalScope !== 'undefined') {
+   onmessage = async (event) => {
+     try {
+-      const files = event.data.type === 'folder' ? await folderFiles(event.data.files) : await imageFiles(event.data.file);
++      const files = event.data.type === 'folder' ? await folderFiles(event.data.files) :
++        event.data.type === 'remote' ? await remoteFiles(event.data.files) : await imageFiles(event.data.file);
+       postMessage({ type: 'done', ...(await copy(files)) });
+     } catch (error) {
+       postMessage({ type: 'error', message: error && error.message ? error.message : String(error) });
+@@ -250,5 +280,5 @@ if (typeof onmessage !== 'undefined' || typeof WorkerGlobalScope !== 'undefined'
+ 
+ // (for the tests: port/web/tests)
+ if (typeof module !== 'undefined') {
+-  module.exports = { findVolume, walkDirectory, mapProblem, imageFiles, folderFiles, plainName };
++  module.exports = { findVolume, walkDirectory, mapProblem, imageFiles, folderFiles, remoteFiles, plainName };
+ }
 diff --git a/port/web/src/web_library.js b/port/web/src/web_library.js
 index 9425c041..14beb61b 100644
 --- a/port/web/src/web_library.js
@@ -506,11 +690,95 @@ index 9425c041..14beb61b 100644
    // internet play's WebRTC connections (port/web/src/web_p2p.c), which the
    // page makes (port/web/site/p2p.js, Module.haloP2P): a command, the
    // connection, and a copy of its text or packet, freed here
+diff --git a/port/web/tests/xiso.test.js b/port/web/tests/xiso.test.js
+index 5d22e1cd..9f854866 100644
+--- a/port/web/tests/xiso.test.js
++++ b/port/web/tests/xiso.test.js
+@@ -168,3 +168,28 @@ test('a maps folder chosen as files is checked as an image is', async () => {
+   assert.deepStrictEqual(result.map((file) => file.name).sort(), ['a10.map', 'bloodgulch.map', 'loading.tga', 'ui.map']);
+   await assert.rejects(xiso.folderFiles(files.filter((file) => file.name !== 'ui.map')), /no ui\.map/);
+ });
++
++test('a maps manifest uses checked ranged reads', async () => {
++  const maps = new Map(goodMaps.map((map) => [map.name, map.data]));
++  const previousFetch = global.fetch;
++  const ranges = [];
++  global.fetch = async (url, options) => {
++    const name = decodeURIComponent(url.split('/').pop());
++    const match = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
++    assert.ok(match);
++    const start = Number(match[1]);
++    const end = Number(match[2]) + 1;
++    ranges.push({ name, start, end });
++    return new Response(maps.get(name).slice(start, end), { status: 206 });
++  };
++  try {
++    const manifest = goodMaps.map((map) => ({ name: map.name, size: map.data.length }));
++    const files = await xiso.remoteFiles(manifest);
++    assert.deepStrictEqual(files.map((file) => file.name).sort(), ['a10.map', 'bloodgulch.map', 'loading.tga', 'ui.map']);
++    assert.ok(ranges.every((range) => range.end - range.start <= 0x800));
++    assert.strictEqual(Buffer.from(await files[0].read(0, 4)).toString('latin1'), 'daeh');
++    await assert.rejects(xiso.remoteFiles([...manifest, manifest[0]]), /manifest is invalid/);
++  } finally {
++    global.fetch = previousFetch;
++  }
++});
+diff --git a/tools/make_maps_manifest.py b/tools/make_maps_manifest.py
+new file mode 100755
+index 00000000..6602d0f5
+--- /dev/null
++++ b/tools/make_maps_manifest.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python3
++"""Write maps/manifest.json for a maps folder beside this script."""
++
++import argparse
++import json
++import os
++import tempfile
++from pathlib import Path
++
++
++def make_manifest(maps: Path) -> Path:
++    entries = [
++        {"name": path.name, "size": path.stat().st_size}
++        for path in sorted(maps.iterdir(), key=lambda path: path.name.lower())
++        if path.is_file() and (path.suffix.lower() == ".map" or path.name.lower() == "loading.tga")
++    ]
++    destination = maps / "manifest.json"
++    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=maps, delete=False) as output:
++        json.dump(entries, output, separators=(",", ":"))
++        output.write("\n")
++        temporary = Path(output.name)
++    os.replace(temporary, destination)
++    return destination
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("maps", nargs="?", type=Path, default=Path(__file__).resolve().parent / "maps")
++    args = parser.parse_args()
++    destination = make_manifest(args.maps.resolve())
++    print(f"Wrote {destination}")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
 diff --git a/tools/web_serve.py b/tools/web_serve.py
-index 3c1fdba7..12f001a4 100644
+index 3c1fdba7..daea387f 100644
 --- a/tools/web_serve.py
 +++ b/tools/web_serve.py
-@@ -108,8 +108,10 @@ class SiteHandler(SimpleHTTPRequestHandler):
+@@ -20,6 +20,8 @@ from http import HTTPStatus
+ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+ from pathlib import Path
+ 
++from make_maps_manifest import make_manifest
++
+ ROOT = Path(__file__).resolve().parent.parent
+ COPY_BUFFER_SIZE = 1 << 20
+ 
+@@ -108,8 +110,10 @@ class SiteHandler(SimpleHTTPRequestHandler):
  
  
  def main(argv=None) -> int:
@@ -522,3 +790,16 @@ index 3c1fdba7..12f001a4 100644
      parser.add_argument("--bind", default="127.0.0.1")
      parser.add_argument("--port", type=int, default=8000)
      parser.add_argument("--as-github-pages", action="store_true",
+@@ -118,6 +122,12 @@ def main(argv=None) -> int:
+     root = args.root.resolve()
+     if not (root / "index.html").is_file():
+         parser.error(f"{root} has no index.html: run `ninja web` first, or name a site's folder")
++    if (root / "maps").is_dir():
++        try:
++            manifest = make_manifest(root / "maps")
++            print(f"Refreshed {manifest}", flush=True)
++        except OSError as error:
++            print(f"Could not write maps manifest: {error}", file=sys.stderr, flush=True)
+ 
+     class Handler(SiteHandler):
+         isolate = not args.as_github_pages

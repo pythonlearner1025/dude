@@ -18,6 +18,8 @@ Playing in the browser on the Mac:
 cd ~/halo-m8-web && python3 web_serve.py
 ```
 
-then open `http://localhost:8000/?m8=ws://100.126.232.8:8091/game`, import the `maps` folder once
-(Game data → Choose a maps folder…), turn the microphone on, and Play. Only one game should be open
+with your own extracted `maps/` folder beside `web_serve.py` (it writes `maps/manifest.json` at
+startup), then open `http://localhost:8000/?m8=ws://100.126.232.8:8091/game`. The page imports the
+maps into the browser's storage by itself on the first visit (`?autoload=0` turns that off; see
+`docs/reports/halo-web-autoload.md`); turn the microphone on once, then Play. Only one game should be open
 at a time: the newest connection takes over the companion.
