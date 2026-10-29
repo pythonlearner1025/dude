@@ -260,6 +260,7 @@ def test_observation_packet(tmp_path):
 
     trace = session_trace(tmp_path, PLAYED)
     assert active(rows_between(trace, 0, 1793000001500)) is False  # only the game's state
+    assert active(rows_between(trace, 1793000001500, 1793000009000)) is False  # no game
     packet = build(trace, 0, 1793000009000, "s-001", {"head": "abc1234"}, None)
     assert packet["level"] == "a30" and packet["counts"]["player_lines"] == 1
     assert packet["counts"]["heartbeat_keeps"] == 1 and packet["counts"]["friendly_fire"] == 1

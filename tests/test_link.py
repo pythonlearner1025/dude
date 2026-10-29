@@ -14,9 +14,7 @@ async def test_handle_all_incoming_kinds():
     link = GameLink({"type": "hello"}, events, hearing)
     await link.handle_frame(KIND_JSON, json.dumps({"type": "state", "state": "ok"}).encode())
     assert link.state["state"] == "ok"
-    await link.handle_frame(
-        KIND_JSON, json.dumps({"type": "new_game", "level": "b30"}).encode()
-    )
+    await link.handle_frame(KIND_JSON, json.dumps({"type": "new_game", "level": "b30"}).encode())
     assert link.state is None
     assert (await events.get())["level"] == "b30"
     await link.handle_frame(

@@ -109,9 +109,7 @@ async def test_decide_do_which_then_speak_and_player_skip(cfg, tmp_path, capsys)
         body = json.loads(req.content)
         questions.append(list(body["questions"]))
         if "which" in body["questions"]:
-            ans = {
-                "which": {"choice": next(iter(body["questions"]["which"]["criteria"]))}
-            }
+            ans = {"which": {"choice": next(iter(body["questions"]["which"]["criteria"]))}}
         else:
             choices = list(body["questions"]["do"]["criteria"])
             ans = {
@@ -294,10 +292,7 @@ async def test_voice_cancels_and_resumes_reflect(cfg, tmp_path):
                 await asyncio.Event().wait()
             content = json.dumps({"orders": ["Stay close"], "remember": ["John trusts Kevin"]})
             return sse(content)
-        stream = (
-            'data: {"choices":[{"delta":{"content":"Copy."}}]}\n\n'
-            "data: [DONE]\n\n"
-        )
+        stream = 'data: {"choices":[{"delta":{"content":"Copy."}}]}\n\ndata: [DONE]\n\n'
         return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
 
     b, _, trace, client = make(cfg, tmp_path, handler)

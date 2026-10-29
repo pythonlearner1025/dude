@@ -32,8 +32,10 @@ def rows_between(trace: Path, start_ms: int, end_ms: int) -> list[dict[str, Any]
 
 
 def active(rows: list[dict[str, Any]]) -> bool:
-    """Whether anything happened worth a look: the player spoke, a skill ended, a game event,
-    or a decision that wasn't a heartbeat keep."""
+    """Whether anything happened worth a look, in a game (not the menus): the player spoke, a
+    skill ended, a game event, or a decision that wasn't a heartbeat keep."""
+    if not any(row["kind"] == "state" for row in rows):
+        return False
     for row in rows:
         kind, data = row["kind"], row["data"]
         if kind == "heard" and data.get("text", "").strip():

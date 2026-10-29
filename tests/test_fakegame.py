@@ -110,9 +110,7 @@ gpu_interval=100
     assert {"kev_start", "kev_done", "llm_request", "first_sentence"} <= stages
     assert {"tts_request", "tts_first_audio", "first_audio_sent"} <= stages
     assert any(span.get("trigger") == "heard" for span in spans)
-    entries = [
-        json.loads(line) for line in (session / "fakegame.jsonl").read_text().splitlines()
-    ]
+    entries = [json.loads(line) for line in (session / "fakegame.jsonl").read_text().splitlines()]
     received = [entry.get("message", {}).get("type") for entry in entries]
     assert {"hello", "action", "say", "heard", "audio_end"} <= set(received)
     assert (session / "bench.json").exists()
