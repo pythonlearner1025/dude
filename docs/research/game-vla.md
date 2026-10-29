@@ -115,3 +115,22 @@ continuous control, or (Kev) see images. Its role is a fast selector/router, not
 - **Best open fits by role:** body → Open-P2P (open, text-conditioned, keyboard/mouse at 20 Hz);
   game-video labelling → [Reka IDM](https://huggingface.co/RekaAI/Reka-Inverse-Dynamics-Model) /
   VPT; fast selector → a game-fine-tuned Kev-4B/9B or Open-Jev-9B; pointing → a GUI grounding model.
+
+## 6. Evidence of transfer to unseen games
+
+- **Open-P2P:** none. Every evaluation uses games in its training set (DOOM, Quake, Roblox titles) or
+  its own two Godot test games; the "competitive with humans" claim rests on human judgement of
+  videos with no human baseline; instruction following works "only for simple instructions similar
+  to those seen during training". Pretraining on IDM-labelled public video lowered test loss but
+  evaluators did not prefer the resulting play.
+- **NitroGen:** two held-out games, fine-tuned only (no zero-shot numbers): +10% (isometric
+  roguelike) and +25% (3D action-RPG) relative task completion over training from scratch; with 30 h
+  of data, combat +52%, navigation +25%, game-specific tasks +5%.
+- **Lumine:** zero-shot runs in two similar games (Wuthering Waves, Honkai: Star Rail) reported as
+  demos without success rates; within Genshin, unseen regions kept NPC interaction but lost some
+  combat and collection skill.
+- **SIMA 2:** held-out ASKA and MineDojo, "far more successful than SIMA 1" (no numbers in the blog).
+
+Pattern: generic skills (moving, fighting) transfer within a genre; game-specific mechanics need
+data from the new game. Halo CE is the same genre as P2P's DOOM/Quake data, so a zero-shot Halo test
+would be a genuine out-of-distribution measurement.
