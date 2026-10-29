@@ -134,3 +134,35 @@ continuous control, or (Kev) see images. Its role is a fast selector/router, not
 Pattern: generic skills (moving, fighting) transfer within a genre; game-specific mechanics need
 data from the new game. Halo CE is the same genre as P2P's DOOM/Quake data, so a zero-shot Halo test
 would be a genuine out-of-distribution measurement.
+
+## 7. Public gameplay data with actions, beyond Open-P2P's own (checked 2026-10-29)
+
+Question: if Open-P2P is to be scaled or retrained for text-conditioned play, what action-labelled
+gameplay is public, and which of it can be text-labelled (a VLM writing, in hindsight, the
+instruction a clip carries out, as Open-P2P did)?
+
+| Dataset | Size | Game(s) | Actions, and how they were got | Text | Available |
+|---|---|---|---|---|---|
+| [Open-P2P](https://huggingface.co/datasets/elefantai/p2p-full-data) (reference) | 8,300 h, 650M frames, 20 fps | 40+ 3D games (Roblox, DOOM/Quake, CoD, Fortnite, L4D2, GTA V…) | keyboard/mouse, recorded | VLM instructions "when available" | yes, video included; its ~10× IDM-labelled video is not released |
+| [NitroGen](https://huggingface.co/datasets/nvidia/NitroGen) | 30k videos, ~15B frames (paper: ~40k h kept of 71k h) | 1,000+ games | gamepad, read from on-screen controller overlays by a model | none | labels only; video re-downloaded from the source URLs; CC BY-NC 4.0 |
+| [GameHorizon-Data](https://www.alphaxiv.org/abs/2609.25001) | 5,000 h | 21 AAA games | keyboard/mouse, 100 expert players | multi-horizon instructions (auto-annotated) | announced, not released |
+| [EgoCS-400K](https://www.alphaxiv.org/abs/2606.18180) | 10,000 h, 400k clips | CS / CS2 | from pro match demos, re-rendered | VLM scene and narrative captions | release and licence unstated |
+| [RekaCS2-10k](https://huggingface.co/datasets/RekaAI/CS2-10k) | 10,000+ h | CS2 | per-frame keys and mouse from demos | none | taken down by Valve |
+| [D2E](https://worv-ai.github.io/d2e/) | 259-335 h human, + 1k h IDM-labelled | 31 desktop games | keyboard/mouse, recorded (OWA toolkit) | none | human part on HF (`open-world-agents/D2E-480p`); Generalist-IDM-1B public |
+| [VPT contractor data](https://openai.com/index/vpt) | ~2,200 h (D2E's count) | Minecraft | keyboard/mouse, recorded | none | yes |
+| [PLAICraft](https://arxiv.org/abs/2505.12707) | 10,000 h collected, 200 h public | multiplayer Minecraft | keyboard/mouse + players' microphones | real speech between players | 200 h subset; licence unstated |
+| [GF-Minecraft](https://huggingface.co/datasets/KlingTeam/GameFactory-Dataset) | 70 h | Minecraft | random scripted actions | VLM captions | yes |
+| [CS deathmatch (Pearce & Zhu)](https://neurips.cc/virtual/2021/48824) | ~95 h | CS:GO | keyboard/mouse | none | yes |
+| [Origin Lab game-recordings](https://huggingface.co/datasets/originlab/game-recordings-v4) | 163 h sample | 20 games | keyboard/mouse, in-engine | event logs | evaluation-only licence |
+
+Labelling tools: [Owl IDM v4](https://huggingface.co/Overworld/owl-idm-4) (MIT; FPS video → W/A/S/D,
+Space, LShift, LCtrl + mouse) and Generalist-IDM-1B turn unlabelled video (e.g. Halo CE on YouTube)
+into keyboard/mouse labels.
+
+For text, what matters is goal-directed human play (an instruction exists to be found), video at
+hand, and an action space like ours. Open-P2P's own data, D2E's human part and NitroGen (once its
+video is fetched; gamepad) qualify; GameHorizon and EgoCS already carry instructions or captions if
+they become available; PLAICraft is the only one with real human language aligned to actions;
+GF-Minecraft's random actions carry no intent. None has companion instructions ("follow me",
+"cover me", "flank right"): they need a partner on screen, so that part has to come from our own
+Halo co-op data.
