@@ -183,6 +183,7 @@ async def test_endless_speech_is_cut_into_segments(cfg):
     async def output(text, timing, turn_id):
         heard.append(text)
 
+    cfg.mic.vad = "energy"
     listener = RealListener(cfg, Transcriber(), 16000, output)
     listener._vad = EndlessSpeechVad()
     for _ in range(45):
