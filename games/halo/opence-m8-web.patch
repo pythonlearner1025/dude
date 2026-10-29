@@ -40,7 +40,7 @@ index 9dc7c289..98b9fd0e 100644
  | `network.stun_servers` | Google and Cloudflare | `HALO_NET_STUN` | The public STUN servers (`host:port`, with commas between them) that give the internet address of a machine. |
  | `discord.application_id` | the application of the project | `HALO_DISCORD_APPLICATION` | The Discord application for invites. Empty: no Discord. |
 diff --git a/port/linux/game/companion.c b/port/linux/game/companion.c
-index f81247de..ae2d89cb 100644
+index f81247de..85129491 100644
 --- a/port/linux/game/companion.c
 +++ b/port/linux/game/companion.c
 @@ -36,8 +36,9 @@ Kevin hears what the player hears: the game sends mate the dialogue it plays
@@ -63,16 +63,18 @@ index f81247de..ae2d89cb 100644
  /* dsound_sdl.c's: Xbox ADPCM to 16-bit samples, freed there (its malloc is the
  C library's, not the game's) */
  short *dsound_decode_xbox_adpcm(const unsigned char *source, unsigned long size, unsigned long channels,
-@@ -259,6 +261,8 @@ struct companion_body
+@@ -259,6 +261,10 @@ struct companion_body
  	real_vector3d look;
  	boolean look_at_player;
  	long look_until;
 +	/* mate's go_to/go_aim chose hold_point, rather than an ordinary stay */
 +	boolean point_target;
++	/* how near hold_point is there (world units; 0: the ordinary 1.5) */
++	real hold_radius;
  };
  
  /* a weapon lying near him, or a vehicle */
-@@ -315,6 +319,23 @@ static long companion_player_unit(
+@@ -315,6 +321,23 @@ static long companion_player_unit(
  	return player_index == NONE ? NONE : player_get(player_index)->unit_index;
  }
  
@@ -96,7 +98,27 @@ index f81247de..ae2d89cb 100644
  /* whether any of the colours companion_paint paints is red */
  static boolean companion_is_red(
  	struct unit_datum *unit)
-@@ -1511,6 +1532,7 @@ static void companion_set_order(
+@@ -1081,7 +1104,7 @@ static boolean companion_goal(
+ 	{
+ 	case _companion_order_hold:
+ 		*goal = companion_body.hold_point;
+-		return distance3d(&origin, goal) > 1.5f;
++		return distance3d(&origin, goal) > (companion_body.hold_radius > 0.f ? companion_body.hold_radius : 1.5f);
+ 
+ 	case _companion_order_pick_up:
+ 		if (!object_try_and_get_and_verify_type(companion_body.goal_object_index, _object_mask_all))
+@@ -1485,7 +1508,10 @@ static void companion_set_order(
+ 	boolean hold_fire)
+ {
+ 	if (order == _companion_order_hold && companion_body.order != _companion_order_hold && companion_unit_index != NONE)
++	{
+ 		object_get_origin(companion_unit_index, &companion_body.hold_point);
++		companion_body.hold_radius = 0.f;
++	}
+ 	if (order != companion_body.order)
+ 		companion_body.goal_valid = FALSE;
+ 	/* (what he decided, on the console in his red) */
+@@ -1511,6 +1537,7 @@ static void companion_set_order(
  	companion_body.order = order;
  	companion_body.target_unit_index = target_unit_index;
  	companion_body.hold_fire = hold_fire;
@@ -104,7 +126,7 @@ index f81247de..ae2d89cb 100644
  	if (hold_fire)
  		companion_body.engaging = FALSE;
  }
-@@ -1572,6 +1594,9 @@ static void companion_handle_messages(
+@@ -1572,6 +1599,9 @@ static void companion_handle_messages(
  		}
  		if (!strstr(message, "\"type\":\"action\""))
  			continue;
@@ -114,15 +136,35 @@ index f81247de..ae2d89cb 100644
  		if (strstr(message, "\"action\":\"follow\""))
  			companion_set_order(_companion_order_follow, companion_body.target_unit_index, companion_body.hold_fire);
  		else if (strstr(message, "\"action\":\"stay\""))
-@@ -1608,6 +1633,7 @@ static void companion_handle_messages(
+@@ -1608,6 +1638,27 @@ static void companion_handle_messages(
  			{
  				companion_set_order(_companion_order_hold, companion_body.target_unit_index, companion_body.hold_fire);
  				companion_body.hold_point = strstr(message, "\"action\":\"go_to\"") ? companion_view_spots[spot - 1] : aim;
++				companion_body.hold_radius = 0.f;
++				companion_body.point_target = TRUE;
++				companion_body.goal_valid = FALSE;
++			}
++		}
++		else if (strstr(message, "\"action\":\"go_point\"") && option)
++		{
++			/* (a point mate's skills worked out, "x,y,z" in metres as the state
++			gives them: he goes there and stays, as for go_to) */
++			real_point3d point;
++
++			if (sscanf(option + strlen("\"option\":\""), "%f,%f,%f", &point.x, &point.y, &point.z) == 3)
++			{
++				point.x /= COMPANION_METRES_PER_UNIT;
++				point.y /= COMPANION_METRES_PER_UNIT;
++				point.z /= COMPANION_METRES_PER_UNIT;
++				companion_set_order(_companion_order_hold, companion_body.target_unit_index, companion_body.hold_fire);
++				companion_body.hold_point = point;
++				/* (skills place him to the metre: behind cover, beside the player) */
++				companion_body.hold_radius = 0.4f;
 +				companion_body.point_target = TRUE;
  				companion_body.goal_valid = FALSE;
  			}
  		}
-@@ -1959,13 +1985,244 @@ static void companion_add_view(
+@@ -1959,13 +2010,244 @@ static void companion_add_view(
  		strcat(actions, one);
  }
  
@@ -369,7 +411,7 @@ index f81247de..ae2d89cb 100644
  	char options[1024] = "";
  	char melee_options[512] = "";
  	char weapon_options[512] = "";
-@@ -1974,7 +2231,9 @@ static void companion_send_state(
+@@ -1974,7 +2256,9 @@ static void companion_send_state(
  	char found_vehicles[512];
  	char actions[8192] = "";
  	char one[160];
@@ -380,7 +422,7 @@ index f81247de..ae2d89cb 100644
  	real_point3d player_origin;
  	short index;
  
-@@ -1987,6 +2246,16 @@ static void companion_send_state(
+@@ -1987,6 +2271,16 @@ static void companion_send_state(
  		char weapon[384] = "no weapon";
  		char doing[96];
  		real_point3d origin;
@@ -397,14 +439,15 @@ index f81247de..ae2d89cb 100644
  		int metres;
  
  		if (weapon_index != NONE)
-@@ -2045,6 +2314,17 @@ static void companion_send_state(
+@@ -2045,6 +2339,18 @@ static void companion_send_state(
  			/* (whole options only, so that the JSON stays whole) */
  			if (strlen(options) + strlen(json) < sizeof(options))
  				strcat(options, json);
 +			snprintf(json, sizeof(json),
-+				"%s{\"id\":\"%ld\",\"kind\":\"%s\",\"pos\":[%.2f,%.2f,%.2f],\"distance_m\":%.1f,\"in_sight\":%s}",
++				"%s{\"id\":\"%ld\",\"kind\":\"%s\",\"health\":%.2f,\"pos\":[%.2f,%.2f,%.2f],\"distance_m\":%.1f,\"in_sight\":%s}",
 +				enemies_v2[0] ? "," : "", companion_enemies[index].unit_index & 0xFFFF,
 +				companion_unit_kind(companion_enemies[index].unit_index),
++				unit_get(companion_enemies[index].unit_index)->object.body_vitality,
 +				companion_enemies[index].aim_point.x * COMPANION_METRES_PER_UNIT,
 +				companion_enemies[index].aim_point.y * COMPANION_METRES_PER_UNIT,
 +				companion_enemies[index].aim_point.z * COMPANION_METRES_PER_UNIT,
@@ -415,7 +458,7 @@ index f81247de..ae2d89cb 100644
  			if (companion_enemies[index].distance <= COMPANION_MELEE_DISTANCE)
  			{
  				snprintf(json, sizeof(json), "%s\"%ld\":\"%s\"", melee_options[0] ? "," : "",
-@@ -2129,6 +2409,41 @@ static void companion_send_state(
+@@ -2129,6 +2435,43 @@ static void companion_send_state(
  			companion_add_action(actions, sizeof(actions), "flashlight",
  				unit->unit.integrated_light_power > 0.f ? "switches his flashlight off" : "switches his flashlight on", NULL);
  		}
@@ -445,30 +488,31 @@ index f81247de..ae2d89cb 100644
 +		companion_vehicle_json(unit, kevin_vehicle, sizeof(kevin_vehicle));
 +		companion_vehicle_json(player_unit, player_vehicle, sizeof(player_vehicle));
 +		snprintf(state_v2, sizeof(state_v2),
-+			"\"kevin\":{\"pos\":[%.2f,%.2f,%.2f],\"facing\":%.1f,\"activity\":\"%s\",\"target\":%s,\"vehicle\":%s},"
-+			"\"player\":{\"pos\":[%.2f,%.2f,%.2f],\"facing\":%.1f,\"aim\":%s,\"vehicle\":%s},"
++			"\"kevin\":{\"pos\":[%.2f,%.2f,%.2f],\"facing\":%.1f,\"health\":%.2f,\"shields\":%.2f,\"activity\":\"%s\",\"target\":%s,\"vehicle\":%s},"
++			"\"player\":{\"pos\":[%.2f,%.2f,%.2f],\"facing\":%.1f,\"health\":%.2f,\"shields\":%.2f,\"aim\":%s,\"vehicle\":%s},"
 +			"\"kevin_from_player\":{\"distance_m\":%.1f,\"bearing_deg\":%.1f},\"enemies\":[%s],",
 +			origin.x * COMPANION_METRES_PER_UNIT, origin.y * COMPANION_METRES_PER_UNIT,
 +			origin.z * COMPANION_METRES_PER_UNIT, companion_facing_degrees(&unit->object.forward),
++			unit->object.body_vitality, unit->object.shield_vitality,
 +			companion_activity(), kevin_target, kevin_vehicle,
 +			player_origin.x * COMPANION_METRES_PER_UNIT, player_origin.y * COMPANION_METRES_PER_UNIT,
 +			player_origin.z * COMPANION_METRES_PER_UNIT, companion_facing_degrees(&player_unit->object.forward),
++			player_unit->object.body_vitality, player_unit->object.shield_vitality,
 +			aim_json, player_vehicle, kevin_distance, kevin_bearing, enemies_v2);
  	}
  	else
  	{
-@@ -2139,12 +2454,86 @@ static void companion_send_state(
+@@ -2139,12 +2482,86 @@ static void companion_send_state(
  
  	snprintf(json, sizeof(json),
  		"{\"type\":\"state\",\"game\":\"Halo: Combat Evolved\",\"player_name\":\"Chief\",\"level\":\"%s\","
 -		"\"in_combat\":%s,\"on_radio\":%s,\"state\":\"%s\",\"actions\":[%s]}",
 +		"\"in_combat\":%s,\"on_radio\":%s,\"state\":\"%s\",%s\"actions\":[%s]}",
- 		tag_name_strip_path(tag_get_name(global_scenario_index)), companion_enemy_count ? "true" : "false",
--		companion_on_radio ? "true" : "false", state, actions);
++		tag_name_strip_path(tag_get_name(global_scenario_index)), companion_enemy_count ? "true" : "false",
 +		companion_on_radio ? "true" : "false", state, state_v2, actions);
- 	mate_link_send(json);
- }
- 
++	mate_link_send(json);
++}
++
 +/* The host's view of its real player 2. The vision-action client owns Kevin's
 +controls, so this state describes him but offers no companion-actor actions. */
 +static void companion_send_coop_state(
@@ -523,7 +567,8 @@ index f81247de..ae2d89cb 100644
 +		"\"kevin\":{\"player_number\":2,\"real_player\":true,\"alive\":%s,\"pos\":[%.2f,%.2f,%.2f],"
 +		"\"health\":%.3f,\"shields\":%.3f,\"weapon\":\"%s\",\"activity\":\"%s\"},"
 +		"\"player\":{\"local\":true,\"pos\":[%.2f,%.2f,%.2f],\"health\":%.3f,\"shields\":%.3f},\"actions\":[]}",
-+		tag_name_strip_path(tag_get_name(global_scenario_index)), companion_enemy_count ? "true" : "false",
+ 		tag_name_strip_path(tag_get_name(global_scenario_index)), companion_enemy_count ? "true" : "false",
+-		companion_on_radio ? "true" : "false", state, actions);
 +		companion_on_radio ? "true" : "false", state, kevin ? "true" : "false",
 +		kevin_origin.x * COMPANION_METRES_PER_UNIT, kevin_origin.y * COMPANION_METRES_PER_UNIT,
 +		kevin_origin.z * COMPANION_METRES_PER_UNIT, kevin ? kevin->object.body_vitality : 0.f,
@@ -531,9 +576,9 @@ index f81247de..ae2d89cb 100644
 +		player_origin.x * COMPANION_METRES_PER_UNIT, player_origin.y * COMPANION_METRES_PER_UNIT,
 +		player_origin.z * COMPANION_METRES_PER_UNIT, player_unit->object.body_vitality,
 +		player_unit->object.shield_vitality);
-+	mate_link_send(json);
-+}
-+
+ 	mate_link_send(json);
+ }
+ 
 +static void companion_send_state(
 +	long player_unit_index)
 +{
@@ -546,7 +591,7 @@ index f81247de..ae2d89cb 100644
  /* what happened since the last state, in words, as one event for mate */
  static void companion_send_events(
  	long player_unit_index)
-@@ -2506,6 +2895,22 @@ static void companion_send_save(
+@@ -2506,6 +2923,22 @@ static void companion_send_save(
  	mate_link_send(json);
  }
  
@@ -569,7 +614,7 @@ index f81247de..ae2d89cb 100644
  /* a gain in DirectSound's millibels (as sound_dsound_xbox.c's
  dsound_volume_from_gain, and above 1 too: his voice can be turned up past
  the game's) */
-@@ -2749,6 +3154,18 @@ void companion_note_loaded(
+@@ -2749,6 +3182,18 @@ void companion_note_loaded(
  	companion_respawn_time = 0;
  }
  
@@ -588,7 +633,7 @@ index f81247de..ae2d89cb 100644
  /* scripted dialogue beginning to play, for mate to hear: Cortana and the crew
  on the radio (no source), and the cutscenes' (heard, not answered) */
  void companion_note_sound(
-@@ -2768,7 +3185,8 @@ void companion_note_sound(
+@@ -2768,7 +3213,8 @@ void companion_note_sound(
  		definition->sound_class != _sound_class_scripted_dialog_to_other &&
  		definition->sound_class != _sound_class_scripted_dialog_force_unspatialized) ||
  		permutation->compression != 1 /* Xbox ADPCM, the only one that plays */ ||
@@ -598,7 +643,7 @@ index f81247de..ae2d89cb 100644
  	{
  		return;
  	}
-@@ -2833,19 +3251,48 @@ boolean companion_console_command(
+@@ -2833,19 +3279,48 @@ boolean companion_console_command(
  void companion_update(
  	void)
  {
@@ -648,7 +693,7 @@ index f81247de..ae2d89cb 100644
  	if (cinematic_in_progress())
  		return;
  
-@@ -2857,6 +3304,23 @@ void companion_update(
+@@ -2857,6 +3332,23 @@ void companion_update(
  		return;
  	}
  	companion_player_dead = FALSE;
@@ -687,7 +732,7 @@ index aaa0b1fe..59a2a390 100644
  /* Kevin's eyes (d3d8_gl.c): whether mate asked for the player's view (once),
  and the frame taken as it was shown, as RGB rows from the top, which goes to
 diff --git a/port/linux/game/network_test.c b/port/linux/game/network_test.c
-index 149023f0..6faa66df 100644
+index 149023f0..8f4976a1 100644
 --- a/port/linux/game/network_test.c
 +++ b/port/linux/game/network_test.c
 @@ -43,6 +43,7 @@ Called from the main loop every frame (main.c).
@@ -816,7 +861,51 @@ index 149023f0..6faa66df 100644
  /* appends to a line, cut short when it is full */
  static void network_test_append(
  	char *line,
-@@ -900,6 +975,20 @@ void network_test_update(
+@@ -740,10 +815,43 @@ static void network_test_pickup(
+ 	}
+ }
+ 
++/* debug.start_level: a campaign level played from the main menu at once, as
++New Game would (tests of the companion, which plays only in single player) */
++static void network_test_start_level(
++	boolean main_menu_loaded,
++	real seconds)
++{
++	static boolean done;
++	static real menu_seconds;
++	char const *name = config_string("debug.start_level");
++	short level;
++
++	if (done || !*name || !main_menu_loaded)
++		return;
++	/* (the menus settled first) */
++	menu_seconds += seconds;
++	if (menu_seconds < 2.f)
++		return;
++	done = TRUE;
++	level = main_get_solo_level_from_name(name);
++	if (level == NONE)
++	{
++		platform_log("start level: '%s' is not a campaign level", name);
++		return;
++	}
++	player_ui_set_single_player_local_player_controller(0, 0);
++	main_set_map_name(main_get_solo_level_name(level));
++	main_set_difficulty(1);
++	game_connection_set(_game_connection_local);
++	main_menu_switch_to_single_player();
++	platform_log("start level: playing %s", main_get_solo_level_name(level));
++}
++
+ void network_test_update(
+ 	boolean main_menu_loaded,
+ 	real seconds)
+ {
++	network_test_start_level(main_menu_loaded, seconds);
+ 	if (!network_test.checked)
+ 		network_test_read_settings();
+ 	if (network_test.mode == _network_test_off)
+@@ -900,6 +1008,20 @@ void network_test_update(
  	{
  		network_test.game_over = TRUE;
  	}
@@ -837,7 +926,7 @@ index 149023f0..6faa66df 100644
  	if (network_test.mode == _network_test_join && network_test.game_over && main_menu_loaded)
  	{
  		network_test.game_over = FALSE;
-@@ -985,6 +1074,11 @@ void network_test_update(
+@@ -985,6 +1107,11 @@ void network_test_update(
  		{
  			network_test.set_up = TRUE;
  			main_set_multiplayer_map_name(network_test.map_name);
@@ -849,7 +938,7 @@ index 149023f0..6faa66df 100644
  			player_ui_fast_setup_network_server();
  			platform_log("network test: hosting %s", network_test.map_name);
  			/* (in the server browser, as Create Game > Internet's PUBLIC) */
-@@ -1033,11 +1127,14 @@ void network_test_update(
+@@ -1033,11 +1160,14 @@ void network_test_update(
  			}
  			if (!network_test.player_added && network_test.setup_seconds >= 2.0f && global_network_game_client_get())
  				network_test.player_added = network_game_client_add_player(global_network_game_client_get(), 0);
@@ -866,7 +955,7 @@ index 149023f0..6faa66df 100644
  			}
  		}
  		break;
-@@ -1045,6 +1142,12 @@ void network_test_update(
+@@ -1045,6 +1175,12 @@ void network_test_update(
  		if (!network_test.set_up)
  		{
  			network_test.set_up = TRUE;
@@ -1258,7 +1347,7 @@ index 13896ae6..e7f67679 100644
  	/* the first copy of the game takes the invites later ones are opened
  	with */
 diff --git a/port/linux/src/port_config.c b/port/linux/src/port_config.c
-index 94342af9..dcfc8863 100644
+index 94342af9..e3c28340 100644
 --- a/port/linux/src/port_config.c
 +++ b/port/linux/src/port_config.c
 @@ -222,6 +222,13 @@ static const struct config_setting config_settings[] =
@@ -1299,7 +1388,7 @@ index 94342af9..dcfc8863 100644
  	{ "network.allow_upnp", _config_boolean, "true", "HALO_NET_ALLOW_UPNP", _environment_value, _platform_all,
  		"Let internet play ask the router (UPnP) to forward its port, for\n"
  		"networks whose NAT stops connections: when a player joins this\n"
-@@ -438,6 +455,18 @@ static const struct config_setting config_settings[] =
+@@ -438,6 +455,21 @@ static const struct config_setting config_settings[] =
  		"Whether an online co-op game (Create Game > Internet, a SINGLEPLAYER\n"
  		"map) starts as PUBLIC or, false, PRIVATE: Server Setup's LISTING in\n"
  		"co-op, which writes its choice here." },
@@ -1315,6 +1404,9 @@ index 94342af9..dcfc8863 100644
 +	{ "network.coop_invite_file", _config_string, "\"\"", "HALO_COOP_INVITE_FILE", _environment_value,
 +		_platform_all,
 +		"Write a coop_host's invite link to this file; empty writes no file." },
++	{ "debug.start_level", _config_string, "\"\"", "HALO_START_LEVEL", _environment_value, _platform_all,
++		"A campaign level such as a30: play it from the main menu at once, on Normal, as New Game would\n"
++		"(for tests). Empty starts normally." },
  	{ "network.coop_friendly_fire", _config_string, "\"on\"", "HALO_NET_COOP_FRIENDLY_FIRE", _environment_value,
  		_platform_all,
  		"Whether the players of an online co-op game hurt each other: \"off\",\n"

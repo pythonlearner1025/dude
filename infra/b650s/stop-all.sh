@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/_pid.sh"
-for name in m8py p2p-client kevin-client p2p kev chat chat-qwen breeze stt; do
+for name in m8py coach p2p-client kevin-client p2p kev chat chat-qwen breeze stt; do
     pidfile="$ROOT/run/$name.pid"
     [[ -e "$pidfile" ]] || continue
     pid="$(pidfile_pid "$pidfile" 2>/dev/null || true)"

@@ -42,6 +42,20 @@ class P2PConfig:
 
 
 @dataclass(slots=True)
+class ActorConfig:
+    """Skill mode: a fast hosted model (OpenRouter) picks Kevin's skills from `library`; tickets
+    for the coach (a frontier model in Claude Code) go to `tickets`."""
+
+    model: str
+    library: Path
+    tickets: Path
+    url: str = "https://openrouter.ai/api/v1/chat/completions"
+    provider: str | None = None
+    key_env: str = "OPENROUTER_API_KEY"
+    timeout: float = 5.0
+
+
+@dataclass(slots=True)
 class ModelsConfig:
     silero_vad: Path
 
@@ -81,6 +95,7 @@ class Config:
     game: GameConfig
     kev: EndpointConfig | None = None  # none in co-op mode: Open-P2P plays Kevin
     p2p: P2PConfig | None = None
+    actor: ActorConfig | None = None
     site: SiteConfig = field(default_factory=SiteConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
     log: LogConfig = field(default_factory=LogConfig)
@@ -108,6 +123,10 @@ class Config:
         models["silero_vad"] = resolved(models.get("silero_vad", "silero_vad.onnx"))
         logging = dict(raw.get("log", {}))
         logging["directory"] = resolved(logging.get("directory", "logs"))
+        actor = dict(raw["actor"]) if "actor" in raw else None
+        if actor:
+            actor["library"] = resolved(actor["library"])
+            actor["tickets"] = resolved(actor["tickets"])
         p2p = dict(raw["p2p"]) if "p2p" in raw else None
         if p2p:
             p2p["instruction"] = resolved(p2p["instruction"])
@@ -119,6 +138,7 @@ class Config:
             stt=EndpointConfig(**raw["stt"]),
             kev=EndpointConfig(**raw["kev"]) if "kev" in raw else None,
             p2p=P2PConfig(**p2p) if p2p else None,
+            actor=ActorConfig(**actor) if actor else None,
             llm=EndpointConfig(**raw["llm"]),
             models=ModelsConfig(**models),
             game=GameConfig(**raw.get("game", {})),

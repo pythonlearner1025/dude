@@ -13,6 +13,7 @@ import httpx
 from .config import Config
 from .link import GameLink
 from .picture import base64, mark, png
+from .play import Play
 from .speak import EndJob, SentenceJob
 from .speaking import Speaking
 from .text import Notes, PieceKind, SentenceSplitter, clean, delivery_note, is_noise
@@ -155,6 +156,11 @@ class Brain:
         self.validator = Validator(
             self.link.send_json, self._validator_changed, self._validator_failed
         )
+        self.play = (
+            Play(cfg, link, trace, self.client, lambda: self.memory.orders, self.fill)
+            if cfg.actor
+            else None
+        )
         if hasattr(self.link, "add_state_observer"):
             self.link.add_state_observer(self._on_state)
 
@@ -199,6 +205,8 @@ class Brain:
         )
 
     def doing_text(self) -> str:
+        if self.play:
+            return f"Kevin's current action: {self.play.doing()}"
         if self.cfg.p2p:
             return f"Kevin's current action: {self.instruction or 'playing on his own'}"
         current = self.validator.current
@@ -279,6 +287,8 @@ class Brain:
         return [{"role": r, "content": t} for r, t in turns]
 
     async def run(self) -> None:
+        if self.play:
+            self.play_task = asyncio.create_task(self.play.run())
         while True:
             quiet = False
             try:
@@ -327,7 +337,10 @@ class Brain:
         self._reflect_log(f"{self.player()}: {item.text}")
         self.trace.add("heard", {"text": item.text})
         # Spoken lines only: typed lines have no turn id and often no punctuation.
-        await self.respond(True, span, noise=item.turn_id is not None and is_noise(item.text))
+        noise = item.turn_id is not None and is_noise(item.text)
+        if self.play and not noise:
+            self.play.trigger(f'the player said "{item.text}"')
+        await self.respond(True, span, noise=noise)
 
     async def on_events(self, events: list[Event], quiet: bool = False) -> None:
         span = self.trace.new_span("quiet" if quiet else "event", **events[0].timing)
@@ -336,6 +349,8 @@ class Brain:
             self.memory.feed.append(text)
             self._reflect_log(text)
             self.validator.on_event(text)
+            if self.play:
+                self.play.trigger(text)
             self.trace.add("event", {"text": text, "react": event.react, "state": self.state()})
         if any(e.react for e in events):
             await self.respond(False, span, quiet=quiet)
@@ -372,6 +387,8 @@ class Brain:
                 span.finish()
 
     def _on_state(self, state: dict[str, Any]) -> None:
+        if self.play:
+            self.play.on_state(state)
         self.validator.update(state)
         self._reflect_heartbeat()
 
@@ -1010,6 +1027,8 @@ class Brain:
         self.validator.current = None
         if self.cfg.p2p:
             self.set_instruction("")
+        if self.play:
+            self.play.reset()
         if self.speaking.is_speaking():
             self.speaking.interrupt()
             await self.link.send_json({"type": "stop_audio"})
@@ -1027,6 +1046,8 @@ class Brain:
         self.validator.current = None
         if self.cfg.p2p:
             self.set_instruction("")
+        if self.play:
+            self.play.reset()
         self.speaking.interrupt()
         await self.link.send_json({"type": "stop_audio"})
         self.trace.add("event", {"text": f"(new game: {level}, memory reset)"})

@@ -9,6 +9,12 @@ if pidfile_live "$pidfile"; then
     echo "m8py is already running (PID $(pidfile_pid "$pidfile"))."
     exit 0
 fi
+# The actor's OpenRouter key (skill mode), kept out of the repo with mode 600.
+if [[ -f "$ROOT/notes/openrouter.env" ]]; then
+    set -a
+    source "$ROOT/notes/openrouter.env"
+    set +a
+fi
 cd "${DUDE_DIR:-$ROOT/dude}"
 PYTHONUNBUFFERED=1 nohup .venv/bin/python -m m8py run "${M8PY_CONFIG:-configs/b650s.toml}" \
     </dev/null >>"$ROOT/logs/m8py.log" 2>&1 &
