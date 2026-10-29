@@ -17,6 +17,13 @@ CHAT_EXTRA="-np 2 -kvu" ./start-chat-qwen.sh          # Qwen3.5-9B + mmproj on :
 ./stop-all.sh                                    # stops only the model servers above
 ```
 
+**Co-op mode** (Kevin is player 2, played by Open-P2P; no Kev): `./start-stack-coop.sh` (Gemma,
+Breeze, STT and `start-p2p.sh`, Open-P2P 600M, ~21.3 GB) then
+`M8PY_CONFIG=configs/b650s-coop.toml ./restart-m8py.sh`. The host's invite makes m8py run
+`kevin-coop.sh`: Kevin's own Halo (`kevin-client.sh`) plus the Open-P2P client
+(`dude/tools/p2p/client.py`); logs in `logs/{kevin-client,p2p-server,p2p-client}.log`.
+`dude/tools/p2p/open-p2p.patch` is our change to the Open-P2P checkout.
+
 `start-chat.sh` (Gemma4-12B) is m8's original LLM; it fits next to Breeze only with Kev at Q4_K_M,
 which is what `start-stack-gemma.sh` runs (the stack in use).
 `restart-m8py.sh` restarts m8py on the current checkout (under a systemd user unit, so it survives

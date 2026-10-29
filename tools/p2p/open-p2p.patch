@@ -1,0 +1,269 @@
+diff --git a/elefant/policy_model/inference.py b/elefant/policy_model/inference.py
+index 71a5a3a..cccec59 100644
+--- a/elefant/policy_model/inference.py
++++ b/elefant/policy_model/inference.py
+@@ -184,6 +184,7 @@ class KVCacheInferenceState(BaseInferenceState):
+         max_virtual_steps: int = 20 * 60 * 60,
+         use_manual_sampling: bool = False,
+         model_records_path: str = None,  # New argument for logging
++        load_text_tokenizer: bool = True,
+     ):
+         super().__init__(config)
+         self.action_mapping = action_mapping
+@@ -200,14 +201,19 @@ class KVCacheInferenceState(BaseInferenceState):
+         self.step_size = self.model.bc_transformer.step_size
+         self.virtual_idx_cpu = 0
+         self.text_tokenizer_model_name = self.model._get_text_tokenizer_name()
+-        if self.text_tokenizer_model_name is not None:
++        if self.text_tokenizer_model_name is not None and load_text_tokenizer:
+             print(f"text_tokenizer_name is not None: {self.text_tokenizer_model_name}")
+             self.text_tokenizer_model = get_text_tokenizer(
+                 TextTokenizerConfig(text_tokenizer_name=self.text_tokenizer_model_name)
+             )
++            # Instructions change rarely. Keep the embedding model off the
++            # crowded inference GPU and cache its result below.
++            self.text_tokenizer_model.to("cpu")
+         else:
+             self.text_tokenizer_model = None
+         self.text_embedding_dim = self.model._get_text_embedding_dim()
++        self._cached_text = object()
++        self._cached_text_tokens_embed = None
+         self.reset()
+ 
+     def reset(self):
+@@ -229,11 +235,17 @@ class KVCacheInferenceState(BaseInferenceState):
+                     size=(num_sampling_steps,), device=self.device
+                 )
+             if self.text_tokenizer_model is not None and text is not None:
+-                text_input = self.text_tokenizer_model.tokenize(text)
+-                text_tokens_embed = self.text_tokenizer_model(**text_input)
+-                assert len(text_tokens_embed.shape) == 4
+-                # squeeze the batch and T dimension
+-                text_tokens_embed = text_tokens_embed.squeeze(dim=(0, 1))
++                if text != self._cached_text:
++                    text_input = self.text_tokenizer_model.tokenize(text)
++                    text_tokens_embed = self.text_tokenizer_model(**text_input)
++                    assert len(text_tokens_embed.shape) == 4
++                    # squeeze the batch and T dimension
++                    text_tokens_embed = text_tokens_embed.squeeze(dim=(0, 1)).to(
++                        self.device, dtype=torch.bfloat16
++                    )
++                    self._cached_text = text
++                    self._cached_text_tokens_embed = text_tokens_embed
++                text_tokens_embed = self._cached_text_tokens_embed
+             elif self.text_tokenizer_model is not None and text is None:
+                 # Notice that this initial value needs to be the same as the
+                 # default value in elefant/data/action_label_video_proto_dataset.py default value
+@@ -310,6 +322,7 @@ class FullInferenceState(BaseInferenceState):
+         config: LightningPolicyConfig,
+         action_mapping: UniversalAutoregressiveActionMapping,
+         model: Stage3LabelledBCLightning,
++        load_text_tokenizer: bool = True,
+     ):
+         self.config = config
+         self.action_mapping = action_mapping
+@@ -323,7 +336,7 @@ class FullInferenceState(BaseInferenceState):
+         self.action_history = collections.deque(maxlen=self.T)
+         self.text_embedding_dim = self.model._get_text_embedding_dim()
+         self.text_tokenizer_model_name = self.model._get_text_tokenizer_name()
+-        if self.text_tokenizer_model_name is not None:
++        if self.text_tokenizer_model_name is not None and load_text_tokenizer:
+             print(f"text_tokenizer_name is not None: {self.text_tokenizer_model_name}")
+             self.text_tokenizer_model = get_text_tokenizer(
+                 TextTokenizerConfig(text_tokenizer_name=self.text_tokenizer_model_name)
+@@ -500,6 +513,9 @@ class InferenceServer(UnixDomainSocketInferenceServer):
+         metrics_window_seconds: float = 60.0,
+         checkpoint_path: str = None,
+         input_text: bool = False,
++        device: str = "auto",
++        warmup_frames: int | None = None,
++        fps_test_frames: int = 10_000,
+     ):
+         super().__init__(uds_path=UDS_PATH)
+         self.shared_text_state = SharedTextInputState(input_text=input_text)
+@@ -526,11 +542,12 @@ class InferenceServer(UnixDomainSocketInferenceServer):
+         else:
+             logging.info(f"Loading model from {checkpoint_path}")
+ 
+-        self._setup_device()
++        self._setup_device(device)
++        accelerator = "gpu" if self.device.startswith("cuda") else "cpu"
+         dummy_trainer = pl.Trainer(
+             precision=config.shared.precision,
+-            accelerator="gpu",
+-            devices=[self.device_idx],
++            accelerator=accelerator,
++            devices=[self.device_idx] if accelerator == "gpu" else 1,
+         )
+ 
+         # Use the dummy trainer to setup the precision, device when loading the model.
+@@ -540,14 +557,17 @@ class InferenceServer(UnixDomainSocketInferenceServer):
+                     # Initialize model with random weights
+                     self.model = Stage3LabelledBCLightning(
+                         config=config, inference_mode=True
+-                    ).to(device="cuda", dtype=torch.bfloat16)
++                    ).to(device=self.device, dtype=torch.bfloat16)
+                 else:
+                     # Load model from checkpoint
+                     self.model = Stage3LabelledBCLightning.load_from_checkpoint(
+                         checkpoint_path,
+                         config=config,
+                         inference_mode=True,
+-                    )
++                        # Loading a training checkpoint directly on CUDA also places
++                        # optimizer state there and can more than double peak VRAM.
++                        map_location="cpu",
++                    ).to(device=self.device, dtype=torch.bfloat16)
+         total_params, expert_params = count_model_parameters(self.model)
+         logging.info(
+             f"Total parameters: {total_params}, Expert parameters: {expert_params}"
+@@ -569,28 +589,39 @@ class InferenceServer(UnixDomainSocketInferenceServer):
+                     self.model,
+                     use_manual_sampling=self.use_manual_sampling,
+                     model_records_path=model_records_path,
++                    load_text_tokenizer=self.input_text,
+                 )
+             else:
+                 logging.warning(
+                     "Using full inference mode - will be slower than using KV Cache."
+                 )
+                 self.inference_state = FullInferenceState(
+-                    self.config, self.action_mapping, self.model
++                    self.config,
++                    self.action_mapping,
++                    self.model,
++                    load_text_tokenizer=self.input_text,
+                 )
+         with log_time("Warm-up / compilation loops"):
+-            self.model_warmup()
++            self.model_warmup(warmup_frames)
+ 
+         logging.info("Model warmup done, any compilation should have been done.")
+         # The warmup should have done all the compilation, so we should fail if we try to compile again.
+         with log_time("FPS test"):
+             with torch.compiler.set_stance(self._compile_stance):
+-                self.fps_test(10_000)
++                self.fps_test(fps_test_frames)
+ 
+         self.active_connections = set()
+ 
+-    def _setup_device(self):
+-        # Only try and do inference on GPU.
+-        assert torch.cuda.is_available()
++    def _setup_device(self, requested_device: str = "auto"):
++        if requested_device == "cpu" or (
++            requested_device == "auto" and not torch.cuda.is_available()
++        ):
++            self.device = "cpu"
++            self.device_idx = 0
++            logging.info("Using device: cpu")
++            return
++        if not torch.cuda.is_available():
++            raise RuntimeError("CUDA requested but torch.cuda.is_available() is false")
+         cuda_devices = [
+             torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())
+         ]
+@@ -643,9 +674,11 @@ class InferenceServer(UnixDomainSocketInferenceServer):
+                     f"Timing metrics for fps test (ms): {json.dumps(stats, indent=1)}"
+                 )
+ 
+-    def model_warmup(self):
++    def model_warmup(self, n_frames: int | None = None):
+         # Make sure to take enough steps to fill the kv cache to hit all compilation.
+-        self.fps_test(n_frames=self.config.shared.n_seq_timesteps + 3)
++        if n_frames is None:
++            n_frames = self.config.shared.n_seq_timesteps + 3
++        self.fps_test(n_frames=n_frames)
+ 
+     def _handle_requests(self, in_queue, out_callback):
+         time_since_last_frame_ns = time.time_ns()
+@@ -1004,10 +1037,12 @@ class InferenceServer(UnixDomainSocketInferenceServer):
+             try:
+                 # Use wait_for to add a timeout, allowing the loop to check self.running
+                 line_bytes = await asyncio.wait_for(reader.readline(), timeout=1.0)
+-                if line_bytes:
+-                    line = line_bytes.decode("utf-8").strip()
+-                    if line:
+-                        self.shared_text_state.set(line)
++                if not line_bytes:
++                    break
++                line = line_bytes.decode("utf-8").strip()
++                if line:
++                    # Empty lines are ignored; <none> returns to no instruction.
++                    self.shared_text_state.set("" if line == "<none>" else line)
+             except asyncio.TimeoutError:
+                 continue
+             except Exception as e:
+@@ -1016,9 +1051,10 @@ class InferenceServer(UnixDomainSocketInferenceServer):
+         logging.info("Terminal listener stopped.")
+ 
+     async def serve(self):
+-        self.terminal_listener_task = asyncio.create_task(
+-            self._listen_for_terminal_input()
+-        )
++        if self.input_text:
++            self.terminal_listener_task = asyncio.create_task(
++                self._listen_for_terminal_input()
++            )
+         await super().serve()
+ 
+ 
+@@ -1033,6 +1069,9 @@ def serve_model(
+     metrics_window_seconds: float = 60.0,
+     checkpoint_path: str = None,
+     input_text: bool = False,
++    device: str = "auto",
++    warmup_frames: int | None = None,
++    fps_test_frames: int = 10_000,
+ ):
+     logging.basicConfig(level=logging.INFO, force=True)
+ 
+@@ -1048,6 +1087,9 @@ def serve_model(
+         metrics_window_seconds=metrics_window_seconds,
+         checkpoint_path=checkpoint_path,
+         input_text=input_text,
++        device=device,
++        warmup_frames=warmup_frames,
++        fps_test_frames=fps_test_frames,
+     )
+ 
+     # Setup signal handlers for non-asyncio contexts
+@@ -1118,6 +1160,9 @@ def _main():
+         default=False,
+         help="Input text from stdin.",
+     )
++    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
++    parser.add_argument("--warmup_frames", type=int, default=None)
++    parser.add_argument("--fps_test_frames", type=int, default=10_000)
+     args = parser.parse_args()
+ 
+     if args.use_full_inference and args.use_manual_sampling:
+@@ -1149,6 +1194,9 @@ def _main():
+             metrics_window_seconds=args.metrics_window_seconds,
+             checkpoint_path=args.checkpoint_path,
+             input_text=args.input_text,
++            device=args.device,
++            warmup_frames=args.warmup_frames,
++            fps_test_frames=args.fps_test_frames,
+         )
+ 
+ 
+diff --git a/elefant/text_tokenizer/config.py b/elefant/text_tokenizer/config.py
+index e976681..6ed68b0 100644
+--- a/elefant/text_tokenizer/config.py
++++ b/elefant/text_tokenizer/config.py
+@@ -1,10 +1,13 @@
++import os
+ from typing import Optional, List
+ import pydantic
+ from elefant.config import ConfigBase
+ 
+ 
+ class GemmaTextTokenizerConfig(ConfigBase):
+-    model_id: str = "google/embeddinggemma-300M"
++    model_id: str = os.environ.get(
++        "P2P_GEMMA_MODEL_ID", "google/embeddinggemma-300M"
++    )
+     max_position_embeddings: int = 128
+ 
+ 
