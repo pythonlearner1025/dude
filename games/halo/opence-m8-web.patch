@@ -1,8 +1,17 @@
 diff --git a/port/linux/README.md b/port/linux/README.md
-index 9dc7c289..e68a180f 100644
+index 9dc7c289..98b9fd0e 100644
 --- a/port/linux/README.md
 +++ b/port/linux/README.md
-@@ -377,6 +377,8 @@ the setting for one start of the game. It has priority over the file.
+@@ -369,6 +369,8 @@ the setting for one start of the game. It has priority over the file.
+ | `companion.radio_volume` | `1.0` | `HALO_COMPANION_RADIO_VOLUME` | The volume of Kevin's voice over the radio, `0` to `16` (`1`: the radio's own level). Kevin Setup's RADIO VOLUME. |
+ | `companion.radio_distance` | `25.0` | `HALO_COMPANION_RADIO_DISTANCE` | How far off, in metres, Kevin talks over the radio (and whenever he is out of sight). Kevin Setup's RADIO DISTANCE. |
+ | `companion.speech_cooldown` | `5.0` | `HALO_COMPANION_SPEECH_COOLDOWN` | Seconds after Kevin's voice stops before what happens in the game can have him talk again; talking to him, he answers at once (mate keeps it). Kevin Setup's SPEECH COOLDOWN. |
++| `companion.link` | `true` | `HALO_M8_LINK` | Connect to m8 (the mate's brain). `false`: this copy never connects, as Kevin's own co-op client does, so the player's game keeps the link. |
++| `companion.actor` | `true` | `HALO_M8_COMPANION_ACTOR` | Place the AI Kevin beside the player in a campaign. `false` leaves the m8 link connected without placing him. A network co-op game never places the AI actor. |
+ | `input.mouse_sensitivity` | `1.0` | `HALO_MOUSE_SENSITIVITY` | The multiplier for the mouse aim. |
+ | `input.mouse_vertical_sensitivity` | `0.0` | `HALO_MOUSE_VERTICAL_SENSITIVITY` | The multiplier for the vertical mouse aim. `0`: the same as `input.mouse_sensitivity`. |
+ | `input.invert_mouse` | `false` | `HALO_MOUSE_INVERT=1` sets `true` | `true`: the vertical mouse aim is inverted. |
+@@ -377,6 +379,8 @@ the setting for one start of the game. It has priority over the file.
  | `game.console_log` | `"important"` | `HALO_CONSOLE_LOG` | What the console shows on the screen. `"important"`: bans, players that the host drops for cheating, the reasons that the game refuses a command, and the asserts that stop the game. `"all"`: all the lines. `"none"`: only the asserts that stop the game. The output of a command always shows. `debug.txt` gets all the lines. |
  | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
  | `game.enhanced_animations` | `true` | `HALO_ENHANCED_ANIMATIONS` | `true`: the player bipeds' grenade throws keep their legs moving, blended by speed and direction (crouched throws stay crouched, throws in the air use the jump's legs), Warthog and Scorpion riders stay seated to throw and let go of the grips to throw and reload, and a player turns with the aim while throwing, as while meleeing. `false`: the original animations, which freeze the legs during a throw and stand a rider up. Only in config.toml, not in the menus. |
@@ -11,11 +20,50 @@ index 9dc7c289..e68a180f 100644
  | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
  | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
  | `network.address` | `""` | `HALO_NET_ADDRESS` | The IPv4 address of this machine for system link. Refer to "Play on one computer". |
+@@ -384,6 +388,7 @@ the setting for one start of the game. It has priority over the file.
+ | `network.online` | `true` | `HALO_NET_ONLINE` | `true`: internet play. `false`: system link on the local network only. |
+ | `network.join_from_clipboard` | `true` | `HALO_NET_JOIN_FROM_CLIPBOARD` | `true`: when the game comes to the front, it joins the game of an invite link on the clipboard. |
+ | `network.tunnel_port` | `0` | `HALO_NET_TUNNEL_PORT` | The UDP port for internet play. `0`: the game selects a port. Refer to "Internet play". |
++| `network.extra_addresses` | `""` | `HALO_NET_EXTRA_ADDRESSES` | Extra comma-separated IPv4 addresses advertised for internet play, in addition to the default-route LAN address and UPnP/STUN addresses. Use a VPN address here when the other player can reach it directly. |
+ | `network.allow_upnp` | `true` | `HALO_NET_ALLOW_UPNP` | `true`: internet play can ask the router to forward its port (UPnP). `false`: the game does not ask. Refer to "Internet play". |
+ | `network.public_lobby` | `true` | `HALO_NET_PUBLIC_LOBBY` | `true`: the server browser. Public games are listed, and Join Game > Server Browser shows them. `false`: no games are listed or shown. Refer to "Server browser". |
+ | `network.host_public` | `true` | `HALO_NET_HOST_PUBLIC` | `true`: a new game of Create Game > Internet starts as PUBLIC. `false`: it starts as PRIVATE. LISTING in Server Setup changes it for each game. Refer to "Server browser". |
+@@ -405,6 +410,10 @@ the setting for one start of the game. It has priority over the file.
+ | `network.map_seed_upload` | `256` | `HALO_NET_MAP_SEED_UPLOAD` | When you play in the game of another machine: the most kilobytes per second that the game sends of maps to other players (`16` to `65536`). UPLOAD LIMIT in Settings > Network Setup > Map Sharing. |
+ | `network.map_download` | `true` | `HALO_NET_MAP_DOWNLOAD` | When you join a game on a Custom Edition map that you do not have: download it from the players of the game. `false`: leave the game and show which map is missing. DOWNLOAD MAPS in Settings > Network Setup > Map Sharing. |
+ | `network.coop_public` | `false` | `HALO_NET_COOP_PUBLIC` | `true`: an online co-op game (Create Game > Internet, a SINGLEPLAYER map) starts as PUBLIC. `false`: it starts as PRIVATE. LISTING in co-op's Server Setup writes its choice here. Refer to "Server browser". |
++| `network.coop_host` | `""` | `HALO_COOP_HOST` | A campaign level such as `a30`: start a private internet co-op game there without the menus. Empty starts normally. The game starts when a second player joins, or as `network.coop_wait` says. |
++| `network.coop_join` | `""` | `HALO_COOP_JOIN` | An invite link or its 64 hexadecimal digits: join it without the menus as a player whose profile is named Kevin (created if needed, with red armour). Empty starts normally. |
++| `network.coop_wait` | `0.0` | `HALO_COOP_WAIT` | Seconds a `network.coop_host` waits before starting alone. `0` waits for a second player. A second player starts the game at once. |
++| `network.coop_invite_file` | `""` | `HALO_COOP_INVITE_FILE` | Write a `network.coop_host` invite link to this file. Empty writes no file. In the web build the invite is also sent over a connected m8 link as `{"type":"invite","link":"..."}`. |
+ | `network.brokers_file` | `"brokers.txt"` | `HALO_NET_BROKERS_FILE` | The file of the public MQTT brokers that let the machines of an invite find each other, and that carry the listings of the server browser: next to `config.toml`, unless a full path. One `host:port` on each line, up to 4; `#` starts a comment. |
+ | `network.stun_servers` | Google and Cloudflare | `HALO_NET_STUN` | The public STUN servers (`host:port`, with commas between them) that give the internet address of a machine. |
+ | `discord.application_id` | the application of the project | `HALO_DISCORD_APPLICATION` | The Discord application for invites. Empty: no Discord. |
 diff --git a/port/linux/game/companion.c b/port/linux/game/companion.c
-index f81247de..1aafba29 100644
+index f81247de..ae2d89cb 100644
 --- a/port/linux/game/companion.c
 +++ b/port/linux/game/companion.c
-@@ -259,6 +259,8 @@ struct companion_body
+@@ -36,8 +36,9 @@ Kevin hears what the player hears: the game sends mate the dialogue it plays
+ memory goes with the game's saves: mate keeps it at each checkpoint and brings
+ it back when that save is loaded (dying forgets what happened since).
+ 
+-Only a single-player campaign has him: not a multiplayer game, and not a
+-client of another machine's game.
++In single player Kevin is this actor. In network co-op, the host instead
++describes the real remote player 2 to mate and never drives that player's unit.
++A client of another machine's game does not run the companion link updates.
+ */
+ 
+ #include "cseries.h"
+@@ -91,6 +92,7 @@ client of another machine's game.
+ void platform_log(char const *format, ...);
+ /* port_config.c's */
+ double config_real(const char *name);
++int config_boolean(const char *name);
+ /* dsound_sdl.c's: Xbox ADPCM to 16-bit samples, freed there (its malloc is the
+ C library's, not the game's) */
+ short *dsound_decode_xbox_adpcm(const unsigned char *source, unsigned long size, unsigned long channels,
+@@ -259,6 +261,8 @@ struct companion_body
  	real_vector3d look;
  	boolean look_at_player;
  	long look_until;
@@ -24,7 +72,31 @@ index f81247de..1aafba29 100644
  };
  
  /* a weapon lying near him, or a vehicle */
-@@ -1511,6 +1513,7 @@ static void companion_set_order(
+@@ -315,6 +319,23 @@ static long companion_player_unit(
+ 	return player_index == NONE ? NONE : player_get(player_index)->unit_index;
+ }
+ 
++/* the other, remote co-op player's living unit (Kevin is player 2) */
++static long companion_coop_unit(
++	void)
++{
++	struct data_iterator iterator;
++	struct player_datum *player;
++	long local_player_index = local_player_get_player_index(0);
++
++	data_iterator_new(&iterator, player_data);
++	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
++	{
++		if (iterator.datum_index != local_player_index && !player->quit_out_of_game)
++			return distributed_living_unit(player);
++	}
++	return NONE;
++}
++
+ /* whether any of the colours companion_paint paints is red */
+ static boolean companion_is_red(
+ 	struct unit_datum *unit)
+@@ -1511,6 +1532,7 @@ static void companion_set_order(
  	companion_body.order = order;
  	companion_body.target_unit_index = target_unit_index;
  	companion_body.hold_fire = hold_fire;
@@ -32,7 +104,17 @@ index f81247de..1aafba29 100644
  	if (hold_fire)
  		companion_body.engaging = FALSE;
  }
-@@ -1608,6 +1611,7 @@ static void companion_handle_messages(
+@@ -1572,6 +1594,9 @@ static void companion_handle_messages(
+ 		}
+ 		if (!strstr(message, "\"type\":\"action\""))
+ 			continue;
++		/* A real co-op player, unlike the companion actor, owns his controls. */
++		if (game_connection() != _game_connection_local || !config_boolean("companion.actor"))
++			continue;
+ 		if (strstr(message, "\"action\":\"follow\""))
+ 			companion_set_order(_companion_order_follow, companion_body.target_unit_index, companion_body.hold_fire);
+ 		else if (strstr(message, "\"action\":\"stay\""))
+@@ -1608,6 +1633,7 @@ static void companion_handle_messages(
  			{
  				companion_set_order(_companion_order_hold, companion_body.target_unit_index, companion_body.hold_fire);
  				companion_body.hold_point = strstr(message, "\"action\":\"go_to\"") ? companion_view_spots[spot - 1] : aim;
@@ -40,7 +122,7 @@ index f81247de..1aafba29 100644
  				companion_body.goal_valid = FALSE;
  			}
  		}
-@@ -1959,13 +1963,244 @@ static void companion_add_view(
+@@ -1959,13 +1985,244 @@ static void companion_add_view(
  		strcat(actions, one);
  }
  
@@ -277,7 +359,8 @@ index f81247de..1aafba29 100644
 +
  /* the game as mate needs it: what is going on, in words, and what Kevin can
  do (its decision model picks one) */
- static void companion_send_state(
+-static void companion_send_state(
++static void companion_send_actor_state(
  	long player_unit_index)
  {
  	struct unit_datum *player_unit = unit_get(player_unit_index);
@@ -286,7 +369,7 @@ index f81247de..1aafba29 100644
  	char options[1024] = "";
  	char melee_options[512] = "";
  	char weapon_options[512] = "";
-@@ -1974,7 +2209,9 @@ static void companion_send_state(
+@@ -1974,7 +2231,9 @@ static void companion_send_state(
  	char found_vehicles[512];
  	char actions[8192] = "";
  	char one[160];
@@ -297,7 +380,7 @@ index f81247de..1aafba29 100644
  	real_point3d player_origin;
  	short index;
  
-@@ -1987,6 +2224,16 @@ static void companion_send_state(
+@@ -1987,6 +2246,16 @@ static void companion_send_state(
  		char weapon[384] = "no weapon";
  		char doing[96];
  		real_point3d origin;
@@ -314,7 +397,7 @@ index f81247de..1aafba29 100644
  		int metres;
  
  		if (weapon_index != NONE)
-@@ -2045,6 +2292,17 @@ static void companion_send_state(
+@@ -2045,6 +2314,17 @@ static void companion_send_state(
  			/* (whole options only, so that the JSON stays whole) */
  			if (strlen(options) + strlen(json) < sizeof(options))
  				strcat(options, json);
@@ -332,7 +415,7 @@ index f81247de..1aafba29 100644
  			if (companion_enemies[index].distance <= COMPANION_MELEE_DISTANCE)
  			{
  				snprintf(json, sizeof(json), "%s\"%ld\":\"%s\"", melee_options[0] ? "," : "",
-@@ -2129,6 +2387,41 @@ static void companion_send_state(
+@@ -2129,6 +2409,41 @@ static void companion_send_state(
  			companion_add_action(actions, sizeof(actions), "flashlight",
  				unit->unit.integrated_light_power > 0.f ? "switches his flashlight off" : "switches his flashlight on", NULL);
  		}
@@ -374,7 +457,7 @@ index f81247de..1aafba29 100644
  	}
  	else
  	{
-@@ -2139,9 +2432,9 @@ static void companion_send_state(
+@@ -2139,12 +2454,86 @@ static void companion_send_state(
  
  	snprintf(json, sizeof(json),
  		"{\"type\":\"state\",\"game\":\"Halo: Combat Evolved\",\"player_name\":\"Chief\",\"level\":\"%s\","
@@ -386,7 +469,84 @@ index f81247de..1aafba29 100644
  	mate_link_send(json);
  }
  
-@@ -2506,6 +2799,22 @@ static void companion_send_save(
++/* The host's view of its real player 2. The vision-action client owns Kevin's
++controls, so this state describes him but offers no companion-actor actions. */
++static void companion_send_coop_state(
++	long player_unit_index)
++{
++	struct unit_datum *player_unit = unit_get(player_unit_index);
++	struct unit_datum *kevin = companion_unit_alive(companion_unit_index) ? unit_get(companion_unit_index) : NULL;
++	real_point3d player_origin;
++	real_point3d kevin_origin = { 0.f, 0.f, 0.f };
++	char weapon[128] = "no weapon";
++	char const *activity = "player-controlled";
++	char state[768];
++	char json[2048];
++
++	object_get_origin(player_unit_index, &player_origin);
++	if (kevin)
++	{
++		long weapon_index = unit_inventory_get_weapon(companion_unit_index, kevin->unit.current_weapon_index);
++
++		object_get_origin(companion_unit_index, &kevin_origin);
++		if (weapon_index != NONE)
++			snprintf(weapon, sizeof(weapon), "%s", companion_unit_kind(weapon_index));
++		if (kevin->object.parent_object_index != NONE)
++			activity = "riding in a vehicle";
++		else if (TEST_FLAG(kevin->unit.control_flags, _unit_control_weapon_primary_trigger_bit))
++			activity = "firing";
++		else if (TEST_FLAG(kevin->unit.control_flags, _unit_control_throw_grenade_bit))
++			activity = "throwing a grenade";
++		else if (TEST_FLAG(kevin->unit.control_flags, _unit_control_weapon_reload_bit))
++			activity = "reloading";
++		else if (TEST_FLAG(kevin->unit.control_flags, _unit_control_crouch_modifier_bit))
++			activity = "crouching";
++		snprintf(state, sizeof(state),
++			"Kevin is player 2, controlled by the co-op client: %s, %s, weapon: %s, %s, %.1f m from {player}. "
++			"{player} is the host's local player: %s, %s.",
++			companion_health_words(kevin->object.body_vitality), companion_shield_words(kevin->object.shield_vitality),
++			weapon, activity, distance3d(&kevin_origin, &player_origin) * COMPANION_METRES_PER_UNIT,
++			companion_health_words(player_unit->object.body_vitality),
++			companion_shield_words(player_unit->object.shield_vitality));
++	}
++	else
++	{
++		snprintf(state, sizeof(state),
++			"Kevin is player 2, controlled by the co-op client, and is dead or waiting to spawn. "
++			"{player} is the host's local player: %s, %s.",
++			companion_health_words(player_unit->object.body_vitality),
++			companion_shield_words(player_unit->object.shield_vitality));
++	}
++	snprintf(json, sizeof(json),
++		"{\"type\":\"state\",\"game\":\"Halo: Combat Evolved\",\"player_name\":\"Chief\",\"level\":\"%s\","
++		"\"in_combat\":%s,\"on_radio\":%s,\"state\":\"%s\","
++		"\"kevin\":{\"player_number\":2,\"real_player\":true,\"alive\":%s,\"pos\":[%.2f,%.2f,%.2f],"
++		"\"health\":%.3f,\"shields\":%.3f,\"weapon\":\"%s\",\"activity\":\"%s\"},"
++		"\"player\":{\"local\":true,\"pos\":[%.2f,%.2f,%.2f],\"health\":%.3f,\"shields\":%.3f},\"actions\":[]}",
++		tag_name_strip_path(tag_get_name(global_scenario_index)), companion_enemy_count ? "true" : "false",
++		companion_on_radio ? "true" : "false", state, kevin ? "true" : "false",
++		kevin_origin.x * COMPANION_METRES_PER_UNIT, kevin_origin.y * COMPANION_METRES_PER_UNIT,
++		kevin_origin.z * COMPANION_METRES_PER_UNIT, kevin ? kevin->object.body_vitality : 0.f,
++		kevin ? kevin->object.shield_vitality : 0.f, weapon, activity,
++		player_origin.x * COMPANION_METRES_PER_UNIT, player_origin.y * COMPANION_METRES_PER_UNIT,
++		player_origin.z * COMPANION_METRES_PER_UNIT, player_unit->object.body_vitality,
++		player_unit->object.shield_vitality);
++	mate_link_send(json);
++}
++
++static void companion_send_state(
++	long player_unit_index)
++{
++	if (game_connection() == _game_connection_local)
++		companion_send_actor_state(player_unit_index);
++	else
++		companion_send_coop_state(player_unit_index);
++}
++
+ /* what happened since the last state, in words, as one event for mate */
+ static void companion_send_events(
+ 	long player_unit_index)
+@@ -2506,6 +2895,22 @@ static void companion_send_save(
  	mate_link_send(json);
  }
  
@@ -409,7 +569,7 @@ index f81247de..1aafba29 100644
  /* a gain in DirectSound's millibels (as sound_dsound_xbox.c's
  dsound_volume_from_gain, and above 1 too: his voice can be turned up past
  the game's) */
-@@ -2749,6 +3058,18 @@ void companion_note_loaded(
+@@ -2749,6 +3154,18 @@ void companion_note_loaded(
  	companion_respawn_time = 0;
  }
  
@@ -428,7 +588,7 @@ index f81247de..1aafba29 100644
  /* scripted dialogue beginning to play, for mate to hear: Cortana and the crew
  on the radio (no source), and the cutscenes' (heard, not answered) */
  void companion_note_sound(
-@@ -2768,7 +3089,8 @@ void companion_note_sound(
+@@ -2768,7 +3185,8 @@ void companion_note_sound(
  		definition->sound_class != _sound_class_scripted_dialog_to_other &&
  		definition->sound_class != _sound_class_scripted_dialog_force_unspatialized) ||
  		permutation->compression != 1 /* Xbox ADPCM, the only one that plays */ ||
@@ -438,14 +598,80 @@ index f81247de..1aafba29 100644
  	{
  		return;
  	}
-@@ -2837,6 +3159,7 @@ void companion_update(
+@@ -2833,19 +3251,48 @@ boolean companion_console_command(
+ void companion_update(
+ 	void)
+ {
++	static boolean actor_off_reported;
++	static boolean coop_kevin_known;
++	static boolean coop_kevin_alive;
++	boolean actor_enabled;
+ 	long player_unit_index;
  	struct unit_datum *player_unit;
  
  	mate_link_start();
 +	companion_send_new_game();
  	if (game_engine_running() || network_game_distributed_client())
  		return;
++	actor_enabled = game_connection() == _game_connection_local && config_boolean("companion.actor");
++	if (!actor_enabled)
++	{
++		if (!actor_off_reported)
++		{
++			platform_log("Kevin's AI companion actor is off%s",
++				game_connection() != _game_connection_local ? " in a network game" : " (companion.actor)");
++			actor_off_reported = TRUE;
++		}
++	}
  
+ 	companion_handle_messages();
+ 	companion_update_mic();
+ 	companion_update_settings();
+-	companion_place_voice();
+ 	player_unit_index = companion_player_unit();
+ 	player_unit = player_unit_index == NONE ? NULL : unit_try_and_get(player_unit_index);
++	if (game_connection() != _game_connection_local)
++	{
++		boolean alive;
++
++		companion_unit_index = companion_coop_unit();
++		alive = companion_unit_alive(companion_unit_index);
++		if (alive)
++			companion_body.aim = unit_get(companion_unit_index)->object.forward;
++		if (coop_kevin_known && coop_kevin_alive && !alive)
++			companion_send_event("Kevin (player 2) died.");
++		if (alive || coop_kevin_known)
++			coop_kevin_known = TRUE;
++		coop_kevin_alive = alive;
++	}
++	companion_place_voice();
+ 	if (cinematic_in_progress())
+ 		return;
+ 
+@@ -2857,6 +3304,23 @@ void companion_update(
+ 		return;
+ 	}
+ 	companion_player_dead = FALSE;
++	if (!actor_enabled)
++	{
++		if (companion_unit_alive(companion_unit_index))
++		{
++			companion_look_around(companion_unit_index, player_unit_index);
++			companion_weapon_count = 0;
++			companion_vehicle_count = 0;
++		}
++		else
++		{
++			companion_enemy_count = 0;
++		}
++		companion_send_events(player_unit_index);
++		if (game_time_get() % COMPANION_STATE_TICKS == 0)
++			companion_send_state(player_unit_index);
++		return;
++	}
+ 
+ 	/* (a new level starts the game's clock again) */
+ 	if (companion_respawn_time > game_time_get() + COMPANION_RESPAWN_TICKS)
 diff --git a/port/linux/game/companion.h b/port/linux/game/companion.h
 index aaa0b1fe..59a2a390 100644
 --- a/port/linux/game/companion.h
@@ -460,6 +686,169 @@ index aaa0b1fe..59a2a390 100644
  
  /* Kevin's eyes (d3d8_gl.c): whether mate asked for the player's view (once),
  and the frame taken as it was shown, as RGB rows from the top, which goes to
+diff --git a/port/linux/game/network_test.c b/port/linux/game/network_test.c
+index 149023f0..6b3986bb 100644
+--- a/port/linux/game/network_test.c
++++ b/port/linux/game/network_test.c
+@@ -43,6 +43,7 @@ Called from the main loop every frame (main.c).
+ #include "interface/player_ui.h"
+ #include "interface/ui_widget.h"
+ #include "networking/network_game_globals.h"
++#include "networking/network_game_manager.h"
+ #include "networking/network_client_manager.h"
+ #include "networking/network_server_manager.h"
+ #include "game/game.h"
+@@ -57,6 +58,7 @@ Called from the main loop every frame (main.c).
+ #include "items/items.h"
+ #include "objects/damage.h"
+ #include "scenario/scenario.h"
++#include "saved games/player_profile.h"
+ #include "tag_files/tag_files.h"
+ #include "camera/observer.h"
+ 
+@@ -122,6 +124,9 @@ static struct
+ 	boolean browsing;
+ 	boolean browse_listed;
+ 	float browse_seconds;
++	boolean automatic_coop;
++	real coop_wait;
++	char coop_invite[256];
+ } network_test;
+ 
+ /* the variant at the index of the list (copied to name), FALSE past its end */
+@@ -153,9 +158,34 @@ static void network_test_read_settings(
+ 	void)
+ {
+ 	char const *setting = config_string("debug.network_test");
++	char const *coop_host = config_string("network.coop_host");
++	char const *coop_join = config_string("network.coop_join");
+ 
+ 	network_test.checked = TRUE;
+-	if (!strncmp(setting, "host:", 5) && setting[5])
++	if (*coop_host)
++	{
++		short level = main_get_solo_level_from_name(coop_host);
++
++		if (level == NONE)
++			platform_log("co-op startup: '%s' is not a campaign level", coop_host);
++		else
++		{
++			network_test.mode = _network_test_host;
++			network_test.automatic_coop = TRUE;
++			network_test.coop_wait = MAX(0.0f, (real)config_real("network.coop_wait"));
++			snprintf(network_test.map_name, sizeof(network_test.map_name), "%s", main_get_solo_level_name(level));
++			snprintf(network_test.variant_name, sizeof(network_test.variant_name), "coop");
++			platform_log("co-op startup: hosting %s privately", network_test.map_name);
++		}
++	}
++	else if (*coop_join)
++	{
++		network_test.mode = _network_test_join;
++		network_test.automatic_coop = TRUE;
++		snprintf(network_test.coop_invite, sizeof(network_test.coop_invite), "%s", coop_join);
++		platform_log("co-op startup: joining the configured invite as Kevin");
++	}
++	else if (!strncmp(setting, "host:", 5) && setting[5])
+ 	{
+ 		char *colon;
+ 
+@@ -186,10 +216,53 @@ static void network_test_read_settings(
+ 	snprintf(network_test.pickup_weapon, sizeof(network_test.pickup_weapon), "%s",
+ 		config_string("debug.network_test_pickup_weapon"));
+ 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
+-	if (network_test.mode != _network_test_off)
++	if (network_test.mode != _network_test_off && *setting)
+ 		platform_log("network test: %s", setting);
+ }
+ 
++static boolean network_test_kevin_profile(void)
++{
++	long indices[32];
++	word count = NUMBEROF(indices);
++	long profile_index = NONE;
++	struct player_profile profile;
++	short index;
++
++	player_profiles_enumerate_available_to_local_player_index(NONE, &count, indices, FALSE);
++	for (index = 0; index < (short)count; index++)
++	{
++		if (player_profile_get(indices[index], &profile) && !ustrcmp(profile.player_name, L"Kevin"))
++		{
++			profile_index = indices[index];
++			break;
++		}
++	}
++	if (profile_index == NONE)
++	{
++		wchar_t name[] = L"Kevin";
++
++		profile_index = player_profile_new(0, name);
++		if (profile_index == NONE || !player_profile_get(profile_index, &profile))
++		{
++			platform_log("co-op startup: could not create the Kevin player profile");
++			return FALSE;
++		}
++		platform_log("co-op startup: created the Kevin player profile");
++	}
++	profile.primary_color_index = 2;
++	player_profile_save(profile_index, &profile);
++	player_ui_set_active_player_profile(0, profile_index, &profile);
++	return TRUE;
++}
++
++static boolean network_test_has_second_player(void)
++{
++	struct network_game_client *client = global_network_game_client_get();
++	struct network_game *game = client ? network_game_client_get_game(client) : NULL;
++
++	return game && game->player_count >= 2;
++}
++
+ /* appends to a line, cut short when it is full */
+ static void network_test_append(
+ 	char *line,
+@@ -985,6 +1058,11 @@ void network_test_update(
+ 		{
+ 			network_test.set_up = TRUE;
+ 			main_set_multiplayer_map_name(network_test.map_name);
++			if (network_test.automatic_coop)
++			{
++				p2p_set_hosting_allowed(TRUE);
++				p2p_set_hosting_public(FALSE);
++			}
+ 			player_ui_fast_setup_network_server();
+ 			platform_log("network test: hosting %s", network_test.map_name);
+ 			/* (in the server browser, as Create Game > Internet's PUBLIC) */
+@@ -1033,11 +1111,14 @@ void network_test_update(
+ 			}
+ 			if (!network_test.player_added && network_test.setup_seconds >= 2.0f && global_network_game_client_get())
+ 				network_test.player_added = network_game_client_add_player(global_network_game_client_get(), 0);
+-			if (network_test.setup_seconds >= network_test.start_delay)
++			if ((!network_test.automatic_coop && network_test.setup_seconds >= network_test.start_delay) ||
++				(network_test.automatic_coop && network_test.map_set && network_test.player_added &&
++					(network_test_has_second_player() ||
++						(network_test.coop_wait > 0.0f && network_test.setup_seconds >= network_test.coop_wait))))
+ 			{
+ 				network_test.started = TRUE;
+ 				network_game_client_request_immediate_start();
+-				platform_log("network test: starting the game");
++				platform_log("%s: starting the game", network_test.automatic_coop ? "co-op startup" : "network test");
+ 			}
+ 		}
+ 		break;
+@@ -1045,6 +1126,12 @@ void network_test_update(
+ 		if (!network_test.set_up)
+ 		{
+ 			network_test.set_up = TRUE;
++			if (network_test.automatic_coop &&
++				(!network_test_kevin_profile() || !p2p_join_invite(network_test.coop_invite)))
++			{
++				platform_log("co-op startup: the configured invite could not be joined");
++				break;
++			}
+ 			dispose_global_network_game_client();
+ 			dispose_global_network_game_server();
+ 			if (create_global_network_game_client())
 diff --git a/port/linux/src/d3d8_gl.c b/port/linux/src/d3d8_gl.c
 index ae4756bf..3303a93a 100644
 --- a/port/linux/src/d3d8_gl.c
@@ -513,10 +902,18 @@ index ae4756bf..3303a93a 100644
  	free(pixels);
  	free(rgb);
 diff --git a/port/linux/src/mate_link.c b/port/linux/src/mate_link.c
-index f90105dc..763bb188 100644
+index f90105dc..c08b0dd2 100644
 --- a/port/linux/src/mate_link.c
 +++ b/port/linux/src/mate_link.c
-@@ -31,6 +31,10 @@ him) empties it.
+@@ -23,6 +23,7 @@ him) empties it.
+ #include "platform.h"
+ #include "posix.h"
+ #include "mate_link.h"
++#include "port_config.h"
+ 
+ #include <SDL3/SDL.h>
+ #include <math.h>
+@@ -31,6 +32,10 @@ him) empties it.
  #include <stdlib.h>
  #include <string.h>
  
@@ -527,7 +924,7 @@ index f90105dc..763bb188 100644
  #define MATE_PORT 47800
  #define MATE_RATE 48000
  /* the voice buffered at most: speech arrives faster than it plays */
-@@ -82,6 +86,15 @@ static float mate_resample_phase, mate_last_sample;
+@@ -82,6 +87,15 @@ static float mate_resample_phase, mate_last_sample;
  static char mate_inbox[MATE_INBOX_MESSAGES][MATE_MESSAGE_SIZE];
  static int mate_inbox_read, mate_inbox_count;
  
@@ -543,7 +940,7 @@ index f90105dc..763bb188 100644
  static int mate_receive_exactly(int socket, void *buffer, int length)
  {
  	char *bytes = buffer;
-@@ -220,6 +233,102 @@ static void mate_handle_json(const char *json)
+@@ -220,6 +234,102 @@ static void mate_handle_json(const char *json)
  	pthread_mutex_unlock(&mate_lock);
  }
  
@@ -646,7 +1043,7 @@ index f90105dc..763bb188 100644
  static void *mate_thread(void *unused)
  {
  	(void)unused;
-@@ -273,6 +382,7 @@ static void *mate_thread(void *unused)
+@@ -273,12 +383,13 @@ static void *mate_thread(void *unused)
  	}
  	return NULL;
  }
@@ -654,7 +1051,14 @@ index f90105dc..763bb188 100644
  
  void mate_link_start(void)
  {
-@@ -304,7 +414,11 @@ void mate_link_start(void)
+ 	pthread_t thread;
+ 
+-	if (mate_started)
++	if (mate_started || !config_boolean("companion.link"))
+ 		return;
+ 	mate_started = 1;
+ 	mate_ring = calloc(MATE_RING_SAMPLES, sizeof(float));
+@@ -304,7 +415,11 @@ void mate_link_start(void)
  	mate_biquad_set(&mate_band[2], 3000.0f, 0);
  	mate_biquad_set(&mate_band[3], 3000.0f, 0);
  	if (mate_ring)
@@ -666,7 +1070,7 @@ index f90105dc..763bb188 100644
  }
  
  int mate_link_connected(void)
-@@ -331,6 +445,9 @@ int mate_link_next_message(char *buffer, int size)
+@@ -331,6 +446,9 @@ int mate_link_next_message(char *buffer, int size)
  void mate_link_send(const char *json)
  {
  	unsigned long length = (unsigned long)strlen(json);
@@ -676,7 +1080,7 @@ index f90105dc..763bb188 100644
  	unsigned char header[5];
  
  	header[0] = MATE_KIND_JSON;
-@@ -345,6 +462,7 @@ void mate_link_send(const char *json)
+@@ -345,6 +463,7 @@ void mate_link_send(const char *json)
  		posix_socket_send(mate_socket, json, (int)length, 0);
  	}
  	pthread_mutex_unlock(&mate_send_lock);
@@ -684,7 +1088,7 @@ index f90105dc..763bb188 100644
  }
  
  void mate_link_send_hear(const char *json, const short *samples, unsigned long count)
-@@ -360,6 +478,20 @@ void mate_link_send_hear(const char *json, const short *samples, unsigned long c
+@@ -360,6 +479,20 @@ void mate_link_send_hear(const char *json, const short *samples, unsigned long c
  	header[4] = (unsigned char)length;
  	header[5] = (unsigned char)(json_length >> 8);
  	header[6] = (unsigned char)json_length;
@@ -705,7 +1109,7 @@ index f90105dc..763bb188 100644
  	pthread_mutex_lock(&mate_send_lock);
  	if (mate_socket >= 0)
  	{
-@@ -369,6 +501,7 @@ void mate_link_send_hear(const char *json, const short *samples, unsigned long c
+@@ -369,6 +502,7 @@ void mate_link_send_hear(const char *json, const short *samples, unsigned long c
  		posix_socket_send(mate_socket, samples, (int)(count * 2), 0);
  	}
  	pthread_mutex_unlock(&mate_send_lock);
@@ -713,7 +1117,7 @@ index f90105dc..763bb188 100644
  }
  
  void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned long size)
-@@ -384,6 +517,19 @@ void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned lo
+@@ -384,6 +518,19 @@ void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned lo
  	header[4] = (unsigned char)length;
  	header[5] = (unsigned char)(json_length >> 8);
  	header[6] = (unsigned char)json_length;
@@ -733,7 +1137,7 @@ index f90105dc..763bb188 100644
  	pthread_mutex_lock(&mate_send_lock);
  	if (mate_socket >= 0)
  	{
-@@ -392,6 +538,7 @@ void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned lo
+@@ -392,6 +539,7 @@ void mate_link_send_view(const char *json, const unsigned char *rgb, unsigned lo
  		posix_socket_send(mate_socket, rgb, (int)size, 0);
  	}
  	pthread_mutex_unlock(&mate_send_lock);
@@ -741,11 +1145,107 @@ index f90105dc..763bb188 100644
  }
  
  void mate_link_set_radio(float radio)
+diff --git a/port/linux/src/p2p.c b/port/linux/src/p2p.c
+index 13896ae6..e7f67679 100644
+--- a/port/linux/src/p2p.c
++++ b/port/linux/src/p2p.c
+@@ -346,6 +346,8 @@ static struct
+ 
+ 	struct stun_server stun[MAXIMUM_STUN_SERVERS];
+ 	int stun_count;
++	struct p2p_candidate extra_candidates[P2P_MAXIMUM_CANDIDATES];
++	int extra_candidate_count;
+ 	/* from the first time a game is hosted or joined */
+ 	int stun_started;
+ 	int reported_symmetric;
+@@ -1413,6 +1415,21 @@ int p2p_local_candidates(struct p2p_candidate *candidates, int maximum_count)
+ 		candidates[count].address = lan;
+ 		candidates[count++].port = p2p.tunnel_port;
+ 	}
++	for (index = 0; index < p2p.extra_candidate_count && count < maximum_count; index++)
++	{
++		int known;
++
++		for (known = 0; known < count; known++)
++		{
++			if (candidates[known].address == p2p.extra_candidates[index].address)
++				break;
++		}
++		if (known == count)
++		{
++			candidates[count].address = p2p.extra_candidates[index].address;
++			candidates[count++].port = p2p.tunnel_port;
++		}
++	}
+ 	/* (the port the router forwards here, UPnP; STUN's addresses are offered
+ 	too, even where the router names another: then either may be the one
+ 	that works, and a machine on the LAN that answers as the router cannot
+@@ -1443,6 +1460,38 @@ int p2p_local_candidates(struct p2p_candidate *candidates, int maximum_count)
+ 	return count;
+ }
+ 
++static void extra_candidates_setup(void)
++{
++	char text[256];
++	char *entry;
++
++	snprintf(text, sizeof(text), "%s", config_string("network.extra_addresses"));
++	for (entry = strtok(text, ","); entry && p2p.extra_candidate_count < P2P_MAXIMUM_CANDIDATES;
++		entry = strtok(NULL, ","))
++	{
++		unsigned long address;
++		char shown[32];
++		char *end;
++
++		while (*entry == ' ' || *entry == '\t')
++			entry++;
++		end = entry + strlen(entry);
++		while (end > entry && (end[-1] == ' ' || end[-1] == '\t'))
++			*--end = 0;
++		address = *entry ? posix_resolve_ipv4(entry) : 0;
++		if (!address)
++		{
++			if (*entry)
++				platform_log("Internet play: extra address '%s' is not an IPv4 address", entry);
++			continue;
++		}
++		p2p.extra_candidates[p2p.extra_candidate_count].address = address;
++		p2p.extra_candidate_count++;
++		platform_log("Internet play: advertising extra address %s",
++			address_text(address, p2p.tunnel_port, shown));
++	}
++}
++
+ static int stun_settled(void)
+ {
+ 	int index;
+@@ -3409,6 +3458,7 @@ void p2p_initialize(unsigned long local_address)
+ 		posix_socket_setsockopt(p2p.tunnel_socket, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
+ 		posix_socket_setsockopt(p2p.tunnel_socket, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
+ 	}
++	extra_candidates_setup();
+ #ifndef HALO_ANDROID
+ 	/* the first copy of the game takes the invites later ones are opened
+ 	with */
 diff --git a/port/linux/src/port_config.c b/port/linux/src/port_config.c
-index 94342af9..b1201b57 100644
+index 94342af9..dcfc8863 100644
 --- a/port/linux/src/port_config.c
 +++ b/port/linux/src/port_config.c
-@@ -313,6 +313,12 @@ static const struct config_setting config_settings[] =
+@@ -222,6 +222,13 @@ static const struct config_setting config_settings[] =
+ 	{ "companion.speech_cooldown", _config_real, "5.0", "HALO_COMPANION_SPEECH_COOLDOWN", _environment_value, _platform_all,
+ 		"Seconds after Kevin's voice stops before what happens in the game can\n"
+ 		"have him talk again (talking to him, he answers at once)." },
++	{ "companion.link", _config_boolean, "true", "HALO_M8_LINK", _environment_value, _platform_all,
++		"Connect to m8 (the mate's brain). false: this copy of the game never\n"
++		"connects, as Kevin's own co-op client does, so the player's game keeps\n"
++		"the link." },
++	{ "companion.actor", _config_boolean, "true", "HALO_M8_COMPANION_ACTOR", _environment_value, _platform_all,
++		"Place the AI Kevin beside the player in a campaign. The mate link stays\n"
++		"connected when this is false. Network co-op never places him." },
+ 
+ 	{ "input.touch_controls", _config_string, "\"auto\"", "HALO_TOUCH_CONTROLS", _environment_value, _platform_android | _platform_web,
+ 		"The on-screen touch controls in a game: \"auto\" shows them on a\n"
+@@ -313,6 +320,12 @@ static const struct config_setting config_settings[] =
  		"to throw and reload, and a player turns with the aim while throwing;\n"
  		"false: the original animations, which freeze the legs and stand a\n"
  		"rider up." },
@@ -758,6 +1258,78 @@ index 94342af9..b1201b57 100644
  	{ "game.custom_edition", _config_boolean, "true", "HALO_CUSTOM_EDITION", _environment_value, _platform_all,
  		"Load and run Halo Custom Edition maps (not those that need OpenSauce):\n"
  		"put them and Custom Edition's bitmaps.map, sounds.map and loc.map in\n"
+@@ -369,6 +382,10 @@ static const struct config_setting config_settings[] =
+ 	{ "network.tunnel_port", _config_integer, "0", "HALO_NET_TUNNEL_PORT", _environment_value, _platform_all,
+ 		"The UDP port internet play uses; 0 picks one. A fixed one can be\n"
+ 		"forwarded on the router, for networks whose NAT stops connections." },
++	{ "network.extra_addresses", _config_string, "\"\"", "HALO_NET_EXTRA_ADDRESSES", _environment_value,
++		_platform_all,
++		"Extra comma-separated IPv4 addresses internet play advertises with its\n"
++		"LAN, UPnP and STUN addresses (a VPN address, for example)." },
+ 	{ "network.allow_upnp", _config_boolean, "true", "HALO_NET_ALLOW_UPNP", _environment_value, _platform_all,
+ 		"Let internet play ask the router (UPnP) to forward its port, for\n"
+ 		"networks whose NAT stops connections: when a player joins this\n"
+@@ -438,6 +455,18 @@ static const struct config_setting config_settings[] =
+ 		"Whether an online co-op game (Create Game > Internet, a SINGLEPLAYER\n"
+ 		"map) starts as PUBLIC or, false, PRIVATE: Server Setup's LISTING in\n"
+ 		"co-op, which writes its choice here." },
++	{ "network.coop_host", _config_string, "\"\"", "HALO_COOP_HOST", _environment_value, _platform_all,
++		"Start a private internet co-op game on this campaign level without the\n"
++		"menus (\"a30\", for example); empty starts normally." },
++	{ "network.coop_join", _config_string, "\"\"", "HALO_COOP_JOIN", _environment_value, _platform_all,
++		"Join this internet co-op invite without the menus, as the Kevin player;\n"
++		"an invite link or its 64 hexadecimal digits; empty starts normally." },
++	{ "network.coop_wait", _config_real, "0.0", "HALO_COOP_WAIT", _environment_value, _platform_all,
++		"A coop_host's seconds to wait before starting alone; 0 waits for a second\n"
++		"player. A second player always starts it at once." },
++	{ "network.coop_invite_file", _config_string, "\"\"", "HALO_COOP_INVITE_FILE", _environment_value,
++		_platform_all,
++		"Write a coop_host's invite link to this file; empty writes no file." },
+ 	{ "network.coop_friendly_fire", _config_string, "\"on\"", "HALO_NET_COOP_FRIENDLY_FIRE", _environment_value,
+ 		_platform_all,
+ 		"Whether the players of an online co-op game hurt each other: \"off\",\n"
+diff --git a/port/linux/src/sdl_platform.c b/port/linux/src/sdl_platform.c
+index 7384b604..78ca1c47 100644
+--- a/port/linux/src/sdl_platform.c
++++ b/port/linux/src/sdl_platform.c
+@@ -14,6 +14,7 @@ and the debug keyboard that the game's console reads.
+ #include "gl.h"
+ #include "port_config.h"
+ #include "p2p.h"
++#include "mate_link.h"
+ #include "xiso.h"
+ #include "touch_input.h"
+ 
+@@ -1180,7 +1181,29 @@ static void platform_invite_clipboard(BOOL look)
+ 
+ 	if (invite)
+ 	{
++		const char *path = config_string("network.coop_invite_file");
++
++		if (*path)
++		{
++			FILE *file = fopen(path, "w");
++
++			if (file)
++			{
++				fprintf(file, "%s\n", invite);
++				fclose(file);
++				platform_log("Internet play: wrote the invite link to %s", path);
++			}
++			else
++				platform_log("Internet play: could not write the invite link to %s", path);
++		}
+ #ifdef HALO_WEB
++		if (mate_link_connected())
++		{
++			char json[128];
++
++			snprintf(json, sizeof(json), "{\"type\":\"invite\",\"link\":\"%s\"}", invite);
++			mate_link_send(json);
++		}
+ 		/* (a page may write the clipboard only when it is clicked: the page
+ 		shows the link, with a button that copies it) */
+ 		web_js_post(2, invite);
 diff --git a/port/web/README.md b/port/web/README.md
 index d68820d2..771670f2 100644
 --- a/port/web/README.md
