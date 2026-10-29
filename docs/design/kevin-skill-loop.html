@@ -1,0 +1,358 @@
+<title>Kevin's Skill Loop</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Saira+Semi+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: one reading column (~46rem) with wide figures and code allowed to scroll; a HUD-like
+   readout strip of measured numbers; sections are the parts of the system in the order a moment
+   flows through them. */
+:root {
+  --bg: #f3f6f9;
+  --surface: #ffffff;
+  --ink: #142233;
+  --muted: #566476;
+  --line: #d6dee8;
+  --accent: #1c5bc9;
+  --accent-soft: #e4edfb;
+  --signal: #9a5400;
+  --signal-soft: #fbeedd;
+  --code-bg: #101925;
+  --code-ink: #d9e4f1;
+  --code-dim: #8597ad;
+  --font-display: "Saira Semi Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c121a; --surface: #131b26; --ink: #e3eaf3; --muted: #95a3b5; --line: #243245;
+    --accent: #72a6ff; --accent-soft: #172338; --signal: #f1b562; --signal-soft: #2a2014;
+    --code-bg: #090e15; --code-ink: #d9e4f1; --code-dim: #7d8ea4; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c121a; --surface: #131b26; --ink: #e3eaf3; --muted: #95a3b5; --line: #243245;
+  --accent: #72a6ff; --accent-soft: #172338; --signal: #f1b562; --signal-soft: #2a2014;
+  --code-bg: #090e15; --code-ink: #d9e4f1; --code-dim: #7d8ea4; color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body);
+  font-size: 16px; line-height: 1.6;
+}
+.page {
+  max-width: 50rem; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 2.5rem 4rem;
+  display: flex; flex-direction: column; gap: 2.75rem;
+}
+header { display: flex; flex-direction: column; gap: 0.75rem; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+}
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.1rem, 5vw, 2.9rem); font-weight: 700; letter-spacing: 0.01em; }
+h2 { font-size: 1.65rem; font-weight: 600; }
+h3 { font-size: 1.2rem; font-weight: 600; }
+p { margin: 0; max-width: 65ch; }
+.lede { font-size: 1.1rem; color: var(--ink); }
+.lede strong { color: var(--accent); font-weight: 600; }
+section { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+ul, ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem; max-width: 65ch; }
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--accent-soft); padding: 0.05em 0.35em; border-radius: 4px; }
+a { color: var(--accent); }
+
+/* measured readout */
+.readout {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden;
+}
+.readout div { padding: 0.9rem 1rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 0.15rem; }
+.readout b { font-family: var(--font-display); font-size: 1.7rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.readout span { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
+.note { font-size: 0.85rem; color: var(--muted); }
+
+/* figures, tables, code */
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; overflow-x: auto; }
+.figure pre.mermaid { margin: 0; background: transparent; min-width: 36rem; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+pre.code {
+  margin: 0; background: var(--code-bg); color: var(--code-ink); font-family: var(--font-mono);
+  font-size: 0.82rem; line-height: 1.55; padding: 1rem 1.1rem; border-radius: 10px; overflow-x: auto;
+  white-space: pre;
+}
+pre.code .c { color: var(--code-dim); }
+.label { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: -0.4rem; }
+
+/* parts of the system */
+.parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr)); gap: 0.75rem; }
+.part { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.part h3 { font-size: 1.05rem; }
+.part .rate { font-family: var(--font-mono); font-size: 0.75rem; color: var(--signal); background: var(--signal-soft); align-self: flex-start; padding: 0.1rem 0.45rem; border-radius: 4px; }
+.part p { font-size: 0.92rem; }
+
+.callout { border-left: 3px solid var(--signal); background: var(--signal-soft); padding: 0.75rem 1rem; border-radius: 0 8px 8px 0; max-width: 65ch; }
+.callout p { font-size: 0.95rem; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">Design · Kevin, AI co-op teammate in Halo CE · 2026-10-29</div>
+    <h1>Kevin's Skill Loop</h1>
+    <p class="lede">Code plays every game tick. <strong>DeepSeek picks the skill</strong> a few times a second. <strong>Opus writes the skills</strong> in Claude Code, minutes behind the action. Nothing learns from pixels.</p>
+  </header>
+
+  <section aria-labelledby="measured">
+    <h2 id="measured">Measured from b650s</h2>
+    <div class="readout">
+      <div><b>174 ms</b><span>DeepSeek V4.1 Flash (Together, OpenRouter) per skill decision, median</span></div>
+      <div><b>232 ms</b><span>same, 90th percentile; first token at 150 ms</span></div>
+      <div><b>15 / 16</b><span>right skill on the obvious-choice probes (local Gemma-12B: 13, Qwen-4B: 12)</span></div>
+      <div><b>90%</b><span>answers in the one-line format without a grammar; the runtime must parse leniently</span></div>
+      <div><b>467 ms</b><span>with reasoning on, for the same 15 / 16: so the loop runs with it off</span></div>
+      <div><b>0.76 s</b><span>to write a 370-token skill: fast enough, but skills are Opus's job</span></div>
+    </div>
+    <p class="note">20 decisions per row, a 1,200-token cached prompt (skills and rules) and a new 180-token game state each step; <code>tools/llm_loop_bench.py</code>. Network to the provider's edge is 3-8 ms.</p>
+  </section>
+
+  <section aria-labelledby="system">
+    <h2 id="system">The system</h2>
+    <div class="figure">
+<pre class="mermaid">
+flowchart LR
+    mic(["you speak"]) --> stt["STT<br/>Parakeet, 60 ms"]
+    stt --> voice["Voice<br/>Gemma-12B, local"] -- speech --> host(["your Halo<br/>(host)"])
+    stt -- "your line" --> actor["Actor<br/>DeepSeek V4.1 Flash<br/>~170 ms a decision"]
+    actor -- "flank elite#1 right" --> runtime["Skill runtime<br/>Python, every tick (30 Hz)"]
+    runtime -- "keys, mouse / commands" --> body(["Kevin's body"])
+    body -- "state" --> runtime
+    runtime -- "state digest, done / failed" --> actor
+    lib[("Skill library<br/>git repo")] -- "catalog, loadout" --> actor
+    lib -- "hot reload" --> runtime
+    actor -- "nofit: an order no skill covers" --> tickets[("Tickets")]
+    runtime -- "failures, traces" --> tickets
+    tickets --> coach["Coach<br/>Opus 5.5 in Claude Code<br/>async, minutes"]
+    coach -- "tested skills, actor prompt, memory" --> lib
+</pre>
+    </div>
+    <div class="parts">
+      <div class="part"><span class="rate">every 33 ms</span><h3>Skill runtime</h3><p>Runs the current skill once per game tick: aims, moves, fires. This is what makes Kevin look smooth and react within a frame, whatever the models are doing.</p></div>
+      <div class="part"><span class="rate">on events + ~1 Hz</span><h3>Actor</h3><p>DeepSeek with reasoning off. Reads a short state digest and answers with one line: a skill and its arguments, <code>keep</code>, or <code>nofit</code>. It never writes code.</p></div>
+      <div class="part"><span class="rate">~1.5 s</span><h3>Voice</h3><p>Unchanged: Gemma answers you out loud, told which skill Kevin is running so his words match his actions.</p></div>
+      <div class="part"><span class="rate">minutes, async</span><h3>Coach</h3><p>Opus in Claude Code on b650s, one ticket at a time. Writes and repairs skills, tests them on recorded traces, rewrites the actor's prompt, keeps memory.</p></div>
+      <div class="part"><span class="rate">a git repo</span><h3>Skill library</h3><p>Python skills with a one-line <code>when</code> each. The catalog the actor sees is built from them. Every change is a commit, so a bad skill rolls back.</p></div>
+      <div class="part"><span class="rate">per game</span><h3>Body API</h3><p>The only game-specific part: state (positions, enemies, cover, paths) and controls (move, aim, fire, crouch, grenade). Everything above it works for any game.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="moment">
+    <h2 id="moment">One order, start to finish</h2>
+    <p>You say "flank right and take out that elite". The skill exists, so Kevin is moving about a third of a second after you stop talking. Today that takes 2-6 s through Reflect.</p>
+    <div class="figure">
+<pre class="mermaid">
+sequenceDiagram
+    participant You
+    participant STT
+    participant Voice
+    participant Actor as Actor (DeepSeek)
+    participant RT as Skill runtime
+    You->>STT: "flank right and take out that elite"
+    STT->>Voice: line (+60 ms)
+    STT->>Actor: line + state digest (+60 ms)
+    Actor->>RT: flank elite#1 right (+230 ms)
+    loop every tick (33 ms)
+        RT->>RT: move to the side point, aim, fire when clear
+    end
+    Voice-->>You: "Going around, keep him busy" (~1.5 s)
+    RT->>Actor: done: target down (~8 s)
+    Actor->>RT: follow 4
+</pre>
+    </div>
+    <p>When no skill fits ("push them off the ridge"), the actor answers <code>nofit push them off the ridge | attack grunt#2</code>. Kevin does the nearest thing at once, and a ticket goes to the coach. Opus writes <code>push_off</code>, tests it and commits it a few minutes later, and from then on the actor sees it in the catalog.</p>
+  </section>
+
+  <section aria-labelledby="strata">
+    <h2 id="strata">Skills in layers</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Layer</th><th>Examples</th><th>Written by</th><th>Changes</th></tr></thead>
+        <tbody>
+          <tr><td>Body API</td><td>move toward, aim at, fire, crouch, grenade; positions, enemies, cover, paths</td><td>us, by hand, once per game</td><td>almost never</td></tr>
+          <tr><td>Motor skills</td><td>track a target, strafe, follow a path, peek from cover</td><td>coach</td><td>rarely; heavily tested</td></tr>
+          <tr><td>Tactical skills</td><td>flank, take cover from, clear a room, cover the player, lead</td><td>coach</td><td>often, from failures and corrections</td></tr>
+          <tr><td>Orders and plans</td><td>"hold here until I say, then follow"</td><td>actor (simple), coach (complex)</td><td>per order</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Recovery follows the same layers. Within a tick, the skill's own fallback handles it (blocked path: reroute). Within ~200 ms, the actor switches skills. Within minutes, the coach fixes the skill from the trace, and the fix applies next time, never mid-fight.</p>
+  </section>
+
+  <section aria-labelledby="discover">
+    <h2 id="discover">How the actor finds and runs skills</h2>
+    <ol>
+      <li><strong>Catalog.</strong> Each skill carries <code>@skill(when=…, args=…, done=…)</code>. The runtime builds one line per skill from it: <code>flank(target, side) — go around an enemy and hit it from the side; "flank", "go around"</code>.</li>
+      <li><strong>Loadout.</strong> Small models get worse as the menu grows, so the actor sees at most ~20 skills. That's a core set (follow, attack, take cover, hold fire…) plus the ones tagged for the moment: in combat, an order in force, a vehicle nearby. The coach curates the tags.</li>
+      <li><strong>Prompt.</strong> The rules, the loadout and worked examples form a stable prefix the provider caches. Only the state digest, events and orders change each step (~180 tokens).</li>
+      <li><strong>Call.</strong> The runtime parses the line leniently, checks the arguments (does <code>elite#1</code> exist?), and starts the skill at the next tick, closing the old one. A malformed or impossible answer is re-asked once with the error, or the current skill keeps running.</li>
+      <li><strong>Feedback.</strong> A skill ends with <code>Done(reason)</code> or <code>Failed(reason)</code>. That becomes the next event the actor reads, along with your lines, new enemies, damage, and a heartbeat about once a second. One request is in flight at a time; an answer that went stale while waiting is asked again.</li>
+    </ol>
+    <div class="label">The actor's prompt (prefix written by the coach)</div>
+<pre class="code"><span class="c"># cached prefix</span>
+You choose what Kevin, the player's Marine teammate, does next. Answer with ONE line:
+  &lt;skill&gt; &lt;args&gt;                    start this skill now
+  keep                              the running skill still fits
+  nofit &lt;order&gt; | &lt;skill&gt; &lt;args&gt;    no skill fits the order; do the nearest one meanwhile
+Orders stay in force until the player changes them. Protect the player; never shoot them.
+Skills:
+  follow(distance=4)       stay behind the player; the default with no order
+  lead(distance=6)         move ahead of the player in their direction: "get in front", "take point"
+  attack(target)           shoot a target until it dies or leaves view; reload when empty
+  flank(target, side)      go around an enemy and hit it from the side: "flank", "go around"
+  take_cover(threat)       get behind the nearest cover from a threat, crouch
+  hold_fire()              stop shooting until told otherwise
+  move_to(place)           go to a named spot or the player's aim point: "get behind that rock"
+  ...
+Examples:
+  "get behind that rock and shoot from there"  -&gt;  move_to aim_point_cover
+  "stop shooting"                              -&gt;  hold_fire
+
+<span class="c"># per decision (~180 tokens)</span>
+t=741.2 s. Kevin 80% health, shield 40%, AR 22/180, 2 grenades. Player 5 m behind, aiming at elite#1.
+Enemies: elite#1 18 m bearing 20° visible; grunt#2 9 m bearing -40° visible.
+Running: follow (4.2 s). Orders: hold fire until the player shoots.
+Events: player said "flank right and take out that elite".
+
+<span class="c"># answer</span>
+flank elite#1 right</pre>
+  </section>
+
+  <section aria-labelledby="skill">
+    <h2 id="skill">What a skill looks like</h2>
+    <p>A skill is a Python generator. It reads the body API, sets this tick's controls, and yields; the runtime calls it again next tick. It bounds itself in time, notices when it's stuck, and hands back control with a reason the actor can act on.</p>
+<pre class="code">@skill(
+    when='go around an enemy and hit it from the side: "flank", "go around", "hit them from the right"',
+    args={"target": "enemy id", "side": "left or right"},
+    done="the target is dead, or Kevin reached its side and engaged",
+)
+def flank(k, target, side="right"):
+    deadline = k.time + 12.0
+    while k.world.alive(target):
+        if k.time &gt; deadline:
+            return Failed("flank took too long")
+        if k.me.health &lt; 0.25:
+            return Failed("low health")              <span class="c"># the actor will pick take_cover</span>
+        enemy = k.world.enemy(target)
+        spot = k.side_point(enemy.pos, k.player.pos, side, metres=12)
+        if k.distance(k.me.pos, spot) &gt; 2 and not k.stuck(seconds=2):
+            k.move_toward(spot)
+            k.aim_at(enemy.pos if enemy.visible else spot)
+        else:
+            return (yield from attack(k, target))      <span class="c"># from the side now</span>
+        yield                                           <span class="c"># end of this tick</span>
+    return Done("target down")</pre>
+  </section>
+
+  <section aria-labelledby="writing">
+    <h2 id="writing">The instruction for writing skills</h2>
+    <p>This lives as <code>CLAUDE.md</code> in the skill repo on b650s. The runtime starts <code>claude -p</code> with Opus 5.5 there, one ticket at a time.</p>
+<pre class="code"># Kevin's skill library: instructions for the coach
+
+You maintain the skills that play Kevin, the player's co-op teammate in Halo CE. A fast model
+(DeepSeek V4.1 Flash) picks one skill at a time, a few times a second, from a catalog built from
+this library; the runtime runs the picked skill every game tick (30 Hz). You are started with one
+ticket (tickets/&lt;id&gt;.json). Resolve it, test, commit, and stop.
+
+## What you may change
+- skills/*.py: the skills.   actor/prompt.md: the actor's rules and worked examples.
+- actor/loadouts.yaml: which skills the actor sees when.   tests/: scenarios and recorded traces.
+- memory/: what Kevin knows about the player and the standing orders worth keeping.
+Never change runtime/, body/ or anything outside this repository.
+
+## The skill contract
+- A skill is a generator decorated with @skill(when=..., args=..., done=...). It drives Kevin only
+  through the body API `k` (body/API.md): read k.me, k.player, k.world; act with k.move_toward,
+  k.aim_at, k.fire, k.crouch, k.jump, k.reload, k.grenade, k.melee; `yield` ends the tick.
+- Yield every tick. Never sleep, block, do I/O, or keep state outside the generator.
+- End with return Done(reason) or Failed(reason). The actor reads the reason, so make it say what
+  happened in a few words ("low health", "target lost", "path blocked").
+- Bound every skill: a time limit, stuck detection (no progress for 2 s), a lost target, low
+  health. Where a cheap fallback exists (reroute, reposition, reload), do it instead of failing.
+- Compose with `yield from other(k, ...)` rather than copying code. Keep skills under 60 lines.
+- Keep the library small: extend or parameterise an existing skill before adding a near-duplicate.
+  Remove skills nothing uses.
+- The `when` line is all the actor sees. Write it for a fast model choosing in 200 ms: concrete,
+  distinct from its neighbours, quoting the phrases players use for it. Under 120 characters.
+
+## Tickets
+- new_order: the actor said no skill fits an order. Write or extend a skill, and add the player's
+  phrasing as a worked example in actor/prompt.md.
+- failure: a skill failed, stalled or got Kevin killed more than once. Find the cause in the
+  attached trace, fix it, and add the trace as a regression test.
+- correction: the player told Kevin he got something wrong ("stop running in front of me"). Fix
+  whichever caused it: the skill, the loadout, or the actor's rules.
+- pattern: the actor keeps issuing the same sequence. Make it one skill if that saves decisions.
+- review (every few minutes of play): read the session's decisions and outcomes. Add examples for
+  the actor's repeated mistakes, consolidate memory/, keep every loadout under 20 skills.
+
+## Before you finish
+1. python -m kevin.skilltest: every skill runs on the recorded traces and simulated scenarios
+   without exceptions, yields every tick and ends within its limits; your skill passes its test.
+2. python -m kevin.catalog --check: the catalog builds; `when` lines are unique and short.
+3. Commit, naming the ticket. The runtime loads the commit at the next skill boundary, and rolls
+   a skill back by itself if it raises in play.
+4. Write tickets/&lt;id&gt;.result.md: two sentences for the session log.</pre>
+    <div class="label">A ticket</div>
+<pre class="code">{"id": "t-0142", "kind": "new_order", "order": "push them off the ridge",
+ "actor_did": "attack grunt#2", "level": "a30", "at": "12:41",
+ "state": "Kevin 70% health ... grunt#2 9 m bearing -40° on the ridge edge ...",
+ "trace": "traces/1793260012.jsonl#880-1210"}</pre>
+  </section>
+
+  <section aria-labelledby="when">
+    <h2 id="when">When a skill gets written or changed</h2>
+    <ul>
+      <li>The actor answers <code>nofit</code>: an order no skill covers.</li>
+      <li>A skill raises, stalls, or Kevin dies in it more than once.</li>
+      <li>You correct Kevin out loud.</li>
+      <li>The actor repeats the same sequence of calls.</li>
+      <li>A review every few minutes of play, and at a new level or enemy type.</li>
+    </ul>
+    <div class="callout"><p>Opus is never in the hot path. Its fixes land minutes later and apply next time. The cost is that an order nothing covers gets the nearest skill first, and Voice should say so ("I'll try").</p></div>
+  </section>
+
+  <section aria-labelledby="budget">
+    <h2 id="budget">Speed targets</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Path</th><th>Target</th><th>Expected</th></tr></thead>
+        <tbody>
+          <tr><td>A tick of the current skill</td><td class="num">33 ms</td><td>code, runs in the game loop</td></tr>
+          <tr><td>Your order → Kevin starts on it</td><td class="num">≤ 1 s</td><td class="num">~0.3 s (STT 60 ms + actor 174 ms, p90 232 ms)</td></tr>
+          <tr><td>A game event → a new skill</td><td class="num">≤ 250 ms</td><td class="num">~0.2 s</td></tr>
+          <tr><td>Kevin's spoken reply</td><td class="num">≤ 1.5 s</td><td class="num">~1.5-1.9 s today</td></tr>
+          <tr><td>A missing skill written and live</td><td class="num">minutes</td><td>not measured yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="build">
+    <h2 id="build">Building it</h2>
+    <ol>
+      <li><strong>Runtime and library</strong>: the <code>@skill</code> decorator, a generator runner, the catalog and loadouts, hot reload from git, traces of every tick and decision.</li>
+      <li><strong>First body: single player.</strong> Halo's own AI already drives the companion through ~17 actions (follow, go to, shoot, cover, hold fire). Wrapping them as the body API lets us test the whole loop without new game code.</li>
+      <li><strong>Actor client</strong>: OpenRouter pinned to Together, reasoning off, the lenient parser, the triggers.</li>
+      <li><strong>Coach</strong>: the ticket queue and a <code>claude -p</code> worker on b650s (its Claude Code is 2.0.1, so it needs an update and a login). Opus writes the first dozen skills from the actions.</li>
+      <li><strong>Score it</strong> on the failures from the fifth playtest: get in front of me, hold fire, get behind that rock, flank right.</li>
+      <li><strong>Then co-op</strong>: a player-2 body API in Kevin's own game (state out, per-tick controls in), so the same skills drive him with your keyboard-and-mouse action space.</li>
+    </ol>
+  </section>
+</div>

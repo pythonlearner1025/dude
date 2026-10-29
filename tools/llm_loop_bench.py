@@ -8,7 +8,9 @@ GBNF grammar, llama.cpp only), and skill+image (one skill call from a screenshot
 through the images given so each step encodes a new one).
 
 Usage: python tools/llm_loop_bench.py --url http://127.0.0.1:8081 --label gemma-12b [--steps 12]
-       [--image a.png,b.png] [--slot 1]
+       [--image a.png,b.png] [--slot 1] [--probe]
+       python tools/llm_loop_bench.py --url https://openrouter.ai/api --key-env OPENROUTER_API_KEY \
+       --model deepseek/deepseek-v4.1-flash-1017 --provider together --label ds-v4.1-flash
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import random
+import re
 import statistics
 import time
 import urllib.request
@@ -77,7 +81,7 @@ def state(step: int, rng: random.Random) -> str:
         f"Enemies: {'; '.join(enemies) or 'none'}.\n"
         f"Cover: rock 4 m bearing 40°, crate 7 m bearing -65°.\n"
         f"Current skill: {rng.choice(list(SKILLS))}. Order in force: {rng.choice(ORDERS)}.\n"
-        f"Player just said: \"{rng.choice(ORDERS + ['behind you!', 'nice shot'])}\""
+        f'Player just said: "{rng.choice(ORDERS + ["behind you!", "nice shot"])}"'
     )
 
 
@@ -112,18 +116,18 @@ UNITS = {
         200,
     ),
     "primitive-terse": (
-        "Give this tick's input only, as: keys dx dy fire (e.g. \"wa 12 -3 1\").",
+        'Give this tick\'s input only, as: keys dx dy fire (e.g. "wa 12 -3 1").',
         'root ::= ("w"|"a"|"s"|"d"|"wa"|"wd"|"sa"|"sd"|"-") " " int " " int " " ("0"|"1")\n'
         'int ::= "-"? [0-9] [0-9]? [0-9]?',
         12,
     ),
     "skill-terse": (
-        "Pick the skill to run now, as: skill target (e.g. \"flank elite#2\").",
+        'Pick the skill to run now, as: skill target (e.g. "flank elite#2").',
         "root ::= (" + "|".join(f'"{name}"' for name in SKILLS) + ') " " [a-z0-9#]{1,12}',
         12,
     ),
     "write": (
-        "No skill fits the player's order \"flank right and push them off the ridge\". Write one "
+        'No skill fits the player\'s order "flank right and push them off the ridge". Write one '
         "new skill as a Python generator function using the body API. Code only.",
         None,
         400,
@@ -131,28 +135,78 @@ UNITS = {
 }
 
 
-def post(url: str, body: dict) -> tuple[float, float, int, dict]:
-    """Streams one completion: (seconds to first token, total seconds, tokens, timings)."""
-    request = urllib.request.Request(
-        f"{url}/v1/chat/completions",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    started = time.perf_counter()
-    first, tokens, timings = None, 0, {}
-    with urllib.request.urlopen(request, timeout=120) as response:
-        for raw in response:
-            line = raw.decode().strip()
-            if not line.startswith("data: ") or line == "data: [DONE]":
-                continue
-            chunk = json.loads(line[6:])
-            timings = chunk.get("timings") or timings
-            choices = chunk.get("choices") or []
-            if choices and choices[0].get("delta", {}).get("content"):
-                first = first or time.perf_counter() - started
-                tokens += 1
-    total = time.perf_counter() - started
-    return first or total, total, timings.get("predicted_n", tokens), timings
+class Target:
+    """An OpenAI-compatible endpoint: a local llama.cpp server (grammars, slots, timings) or a
+    hosted one such as OpenRouter (key from --key-env, a pinned provider, reasoning on or off)."""
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.url, self.slot, self.model = args.url, args.slot, args.model
+        self.local = args.model is None
+        self.headers = {"Content-Type": "application/json"}
+        if args.key_env:
+            self.headers["Authorization"] = f"Bearer {os.environ[args.key_env]}"
+        self.extra: dict = {}
+        if not self.local:
+            self.extra = {"model": args.model, "reasoning": {"enabled": args.reasoning}}
+            if args.provider:
+                self.extra["provider"] = {"only": [args.provider], "allow_fallbacks": False}
+
+    def body(self, messages: list, limit: int, schema: object, temperature: float) -> dict:
+        body = {"messages": messages, "temperature": temperature, "max_tokens": limit, **self.extra}
+        if self.local:
+            body["chat_template_kwargs"] = {"enable_thinking": False}
+            if isinstance(schema, str):
+                body["grammar"] = schema
+            elif schema:
+                body["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "answer", "schema": schema},
+                }
+            if self.slot is not None:
+                body["id_slot"] = self.slot
+        elif limit < 100:  # room for the answer after any reasoning
+            body["max_tokens"] = limit + (2000 if self.extra["reasoning"]["enabled"] else 0)
+        return body
+
+    def post(self, body: dict) -> tuple[float, float, int, dict, str]:
+        """Streams one completion: (s to first answer token, total s, tokens, timings, text).
+        Hosted endpoints report usage, not llama.cpp timings: prompt and cached tokens."""
+        request = urllib.request.Request(
+            f"{self.url}/v1/chat/completions",
+            data=json.dumps(
+                {**body, "stream": True, "stream_options": {"include_usage": True}}
+            ).encode(),
+            headers=self.headers,
+        )
+        started = time.perf_counter()
+        first, tokens, timings, text = None, 0, {}, ""
+        with urllib.request.urlopen(request, timeout=120) as response:
+            for raw in response:
+                line = raw.decode().strip()
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                chunk = json.loads(line[6:])
+                timings = chunk.get("timings") or timings
+                if (usage := chunk.get("usage")) and "prompt_ms" not in timings:
+                    details = usage.get("prompt_tokens_details") or {}
+                    timings = {
+                        "predicted_n": usage.get("completion_tokens", 0),
+                        "prompt_n": usage.get("prompt_tokens", 0)
+                        - (details.get("cached_tokens") or 0),
+                    }
+                choices = chunk.get("choices") or []
+                if choices and (delta := choices[0].get("delta", {}).get("content")):
+                    first = first or time.perf_counter() - started
+                    tokens += 1
+                    text += delta
+        total = time.perf_counter() - started
+        return first or total, total, timings.get("predicted_n", tokens), timings, text
+
+
+TERSE = {
+    "skill-terse": re.compile(r"^\s*(" + "|".join(SKILLS) + r") \S+\s*$"),
+    "primitive-terse": re.compile(r"^\s*(w|a|s|d|wa|wd|sa|sd|-) -?\d+ -?\d+ [01]\s*$"),
+}
 
 
 # Situations with an obvious skill (any listed one counts): state, player's line, right skills.
@@ -176,7 +230,7 @@ PROBES = [
 ]
 
 
-def probe(url: str, slot: int | None) -> float:
+def probe(target: Target) -> float:
     """Share of PROBES answered with a right skill, terse format."""
     ask, grammar, limit = UNITS["skill-terse"]
     right = 0
@@ -186,30 +240,19 @@ def probe(url: str, slot: int | None) -> float:
             f"Player: 5 m away bearing 0°. Enemies: {enemies}.\nCurrent skill: follow.\n"
             f'Player just said: "{said or "(nothing)"}"\n\n{ask}'
         )
-        body = {
-            "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}],
-            "temperature": 0,
-            "max_tokens": limit,
-            "stream": True,
-            "grammar": grammar,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-        if slot is not None:
-            body["id_slot"] = slot
-        request = urllib.request.Request(
-            f"{url}/v1/chat/completions",
-            data=json.dumps({**body, "stream": False}).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        answer = json.load(urllib.request.urlopen(request, timeout=60))
-        chosen = answer["choices"][0]["message"]["content"].split(" ")[0]
-        right += chosen in good
+        messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}]
+        answer = target.post(target.body(messages, limit, grammar, 0))[4].strip()
+        right += answer.split(" ")[0] in good
     return right / len(PROBES)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", required=True)
+    parser.add_argument("--url", required=True, help="e.g. http://127.0.0.1:8081")
+    parser.add_argument("--model", help="hosted model id (no llama.cpp features then)")
+    parser.add_argument("--key-env", help="environment variable holding the API key")
+    parser.add_argument("--provider", help="the one provider to use (OpenRouter)")
+    parser.add_argument("--reasoning", action="store_true")
     parser.add_argument("--label", required=True)
     parser.add_argument("--steps", type=int, default=12)
     parser.add_argument("--slot", type=int, default=None)
@@ -217,8 +260,9 @@ def main() -> None:
     parser.add_argument("--units", default="primitive,primitive-terse,skill,skill-terse,plan,write")
     parser.add_argument("--probe", action="store_true", help="also score PROBES")
     args = parser.parse_args()
+    target = Target(args)
     if args.probe:
-        print(json.dumps({"model": args.label, "probe_right": probe(args.url, args.slot)}))
+        print(json.dumps({"model": args.label, "probe_right": probe(target)}))
     rng = random.Random(7)
     units = args.units.split(",") + (["skill+image"] if args.image else [])
     for unit in units:
@@ -233,30 +277,24 @@ def main() -> None:
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{picture}"}},
                     {"type": "text", "text": f"Order in force: flank right.\n\n{ask}"},
                 ]
-            body = {
-                "messages": [
-                    {"role": "system", "content": SYSTEM},
-                    {"role": "user", "content": content},
-                ],
-                "temperature": 0.2,
-                "max_tokens": limit,
-                "stream": True,
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
-            if isinstance(schema, str):
-                body["grammar"] = schema
-            elif schema:
-                body["response_format"] = {
-                    "type": "json_schema",
-                    "json_schema": {"name": unit, "schema": schema},
-                }
-            if args.slot is not None:
-                body["id_slot"] = args.slot
-            first, total, tokens, timings = post(args.url, body)
+            messages = [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": content},
+            ]
+            first, total, tokens, timings, text = target.post(
+                target.body(messages, limit, schema, 0.2)
+            )
             if step:
                 rows.append(
-                    (first, total, tokens, timings.get("prompt_n", 0), timings.get("prompt_ms", 0),
-                     timings.get("predicted_per_second", 0))
+                    (
+                        first,
+                        total,
+                        tokens,
+                        timings.get("prompt_n", 0),
+                        timings.get("prompt_ms", 0),
+                        timings.get("predicted_per_second", 0),
+                        bool(TERSE[unit].match(text)) if unit in TERSE else True,
+                    )
                 )
         firsts, totals = [r[0] for r in rows], sorted(r[1] for r in rows)
         result = {
@@ -270,6 +308,7 @@ def main() -> None:
             "prefill_ms": round(statistics.median(r[4] for r in rows)),
             "decode_tok_s": round(statistics.median(r[5] for r in rows)),
             "steps_per_s": round(1 / statistics.median(totals), 1),
+            "format_ok": round(sum(r[6] for r in rows) / len(rows), 2),
         }
         print(json.dumps(result), flush=True)
 

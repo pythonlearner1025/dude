@@ -35,6 +35,11 @@ snapshot per step, thinking off, output constrained by a grammar. Medians of 10 
 
 - Reading the new state dominates a terse step (4B: 72 of 101 ms); fewer state tokens per step is
   the next lever.
+- **DeepSeek V4.1 Flash (1017) via OpenRouter, Together only, reasoning off** (20 steps, from
+  b650s): skill call 174 ms median, 232 ms p90 (first token 150 ms); 15/16 probes right (best of
+  all); the one-line format held in 90% of answers without a grammar; a 370-token skill in 0.76 s.
+  With reasoning on: 467 ms median, 761 ms p90, same 15/16. This is the actor in the design
+  (`docs/design/kevin-skill-loop.html`).
 - A screenshot instead of the text state: Gemma 854 ms per skill call (435 new prompt tokens).
 - The probes are 16 situations with an obvious skill ("Hold your fire." → hold_fire, an enemy at
   1 m → melee); a floor for choice quality, not a measure of tactics.
