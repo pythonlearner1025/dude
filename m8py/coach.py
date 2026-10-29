@@ -58,7 +58,14 @@ ISOLATED = [
 ]
 
 
-def handle(ticket: Path, library: Path, model: str, timeout: float, claude: str = "claude") -> bool:
+def handle(
+    ticket: Path,
+    library: Path,
+    model: str,
+    timeout: float,
+    claude: str = "claude",
+    effort: str = "high",
+) -> bool:
     """Runs Claude on one ticket; False if Claude Code isn't signed in (the ticket waits)."""
     prompt = (
         f"Resolve the ticket {ticket}. Follow CLAUDE.md in this directory: change the skills "
@@ -66,7 +73,7 @@ def handle(ticket: Path, library: Path, model: str, timeout: float, claude: str 
         f"commit, then write {ticket.with_suffix('.result.md')}."
     )
     trace = json.loads(ticket.read_text()).get("trace")
-    command = [claude, "-p", prompt, "--model", model, "--effort", "high", *ISOLATED]
+    command = [claude, "-p", prompt, "--model", model, "--effort", effort, *ISOLATED]
     command += ["--permission-mode", "acceptEdits", "--add-dir", str(ticket.parent)]
     command += ["--add-dir", str(Path(trace).parent)] if trace else []
     command += ["--output-format", "stream-json", "--verbose", "--allowedTools", *TOOLS]
@@ -105,6 +112,7 @@ def main() -> None:
     parser.add_argument("--tickets", type=Path, required=True)
     parser.add_argument("--model", default="claude-opus-5-5")
     parser.add_argument("--timeout", type=float, default=1200)
+    parser.add_argument("--effort", default="high", help="low, medium, high, xhigh or max")
     parser.add_argument("--once", action="store_true", help="handle what is waiting, then stop")
     parser.add_argument("--claude", default="claude", help="the Claude Code command")
     args = parser.parse_args()
@@ -113,9 +121,8 @@ def main() -> None:
     while True:
         waiting = pending(args.tickets)
         if waiting:
-            if not handle(
-                waiting[0], args.library.resolve(), args.model, args.timeout, args.claude
-            ):
+            library = args.library.resolve()
+            if not handle(waiting[0], library, args.model, args.timeout, args.claude, args.effort):
                 time.sleep(300)
         elif args.once:
             return
