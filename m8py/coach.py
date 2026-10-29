@@ -8,6 +8,7 @@ Usage: python -m m8py.coach --library ~/m8work/kevin-skills --tickets ~/m8work/r
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import time
 from pathlib import Path
@@ -42,6 +43,18 @@ def pending(tickets: Path) -> list[Path]:
 
 
 SIGNED_OUT = ("Please run /login", "authentication_error", "Invalid API key")
+# Only the library's CLAUDE.md: not the machine owner's settings, skills, plugins, MCP
+# servers or personal CLAUDE.md (which hands all work to Codex).
+ISOLATED = [
+    "--setting-sources",
+    "project,local",
+    "--settings",
+    json.dumps({"claudeMdExcludes": [str(Path.home() / ".claude" / "CLAUDE.md")]}),
+    "--disable-slash-commands",
+    "--strict-mcp-config",
+    "--tools",
+    "Read,Edit,Write,Glob,Grep,Bash",
+]
 
 
 def handle(ticket: Path, library: Path, model: str, timeout: float, claude: str = "claude") -> bool:
@@ -51,8 +64,11 @@ def handle(ticket: Path, library: Path, model: str, timeout: float, claude: str 
         f"or the actor's prompt as the ticket needs, run the skill tests until they print ok, "
         f"commit, then write {ticket.with_suffix('.result.md')}."
     )
-    command = [claude, "-p", prompt, "--model", model, "--permission-mode", "acceptEdits"]
-    command += ["--allowedTools", *TOOLS]
+    trace = json.loads(ticket.read_text()).get("trace")
+    command = [claude, "-p", prompt, "--model", model, "--effort", "high", *ISOLATED]
+    command += ["--permission-mode", "acceptEdits", "--add-dir", str(ticket.parent)]
+    command += ["--add-dir", str(Path(trace).parent)] if trace else []
+    command += ["--output-format", "stream-json", "--verbose", "--allowedTools", *TOOLS]
     started = time.monotonic()
     with ticket.with_suffix(".log").open("w") as log:
         try:

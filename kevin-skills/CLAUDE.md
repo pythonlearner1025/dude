@@ -37,16 +37,20 @@ Never change anything outside this directory (the runtime, `m8py/`, is not yours
   distinct from every other skill's.
 
 ## Tickets
+Every ticket has `recent`: the latest decisions (`<what happened> => <the actor's answer>`) and
+skill endings, oldest first, and `state`: what the actor saw when the ticket was written. Start
+there. `trace` is the session's full log (JSON lines, some very long); search it with Grep for a
+detail `recent` lacks, never read it whole. Work alone and quickly: a ticket should take minutes.
 - `new_order`: the actor answered `nofit` for an order no skill covers. Write or extend a skill
   and add the player's phrasing to the examples in `actor/prompt.md`.
-- `failure`: a skill raised an error, or failed twice within three minutes. Find the cause in the
-  session trace (`trace` in the ticket; read the `decision`, `skill`, `body` and `event` lines
-  around the failure, not the whole file), fix it, and add a test that would have caught it.
+- `failure`: a skill raised an error, or failed twice within three minutes. Find the cause from
+  `recent` and `state`, and from the trace only if they are not enough; fix it, and add a test
+  that would have caught it.
 - `correction`: the player told Kevin he got something wrong. Fix whichever caused it: the
   skill, its tags, or the actor's rules and examples.
-- `review`: every ten minutes of play. Read the session's `decision` lines: where the actor
-  picked badly, add a rule or an example to `actor/prompt.md`; where it answered `nofit`, check
-  the matching ticket was handled.
+- `review`: every ten minutes of play. Read `recent`: where the actor picked badly, add a rule
+  or an example to `actor/prompt.md`; where a skill misbehaved, fix it. Fix the two or three
+  that matter most and stop; leave `nofit` orders to their own tickets.
 - `library_errors` in any ticket lists files that failed to load: fix them first.
 
 ## Before you finish

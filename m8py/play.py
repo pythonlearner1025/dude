@@ -9,6 +9,7 @@ import asyncio
 import json
 import re
 import time
+from collections import deque
 from typing import Any, Callable
 
 import httpx
@@ -65,6 +66,7 @@ class Play:
         self.next_review = time.monotonic() + REVIEW
         self.decisions = 0
         self.retried = False
+        self.story: deque[str] = deque(maxlen=80)  # recent decisions and skill ends, for tickets
 
     # ---------- the game's side
 
@@ -109,6 +111,7 @@ class Play:
             "skill", {"skill": running.skill.name, "args": running.args, verb: result.reason}
         )
         print(f"[skill] {self.last}", flush=True)
+        self.story.append(f"{time.strftime('%H:%M:%S')} {self.last}")
         if isinstance(result, Failed):
             now = time.monotonic()
             recent = [t for t in self.failures.get(running.skill.name, []) if now - t < 180] + [now]
@@ -185,6 +188,8 @@ class Play:
         answer, ms, usage = await self.actor.ask(system, user)
         decision = parse(answer, self.library)
         asked = any(reason.startswith("the player said") for reason in reasons)
+        if decision.kind != "keep" or reasons != ["heartbeat"]:
+            self.story.append(f"{time.strftime('%H:%M:%S')} {' / '.join(reasons)} => {answer}")
         error = self.apply(decision, asked)
         retry = None
         if error:  # one more try, told why
@@ -192,7 +197,10 @@ class Play:
             retry, more, _ = await self.actor.ask(system, again)
             ms += more
             decision = parse(retry, self.library)
+            self.story.append(f"  (could not run: {error}) => {retry}")
             error = self.apply(decision, asked)
+            if error:
+                self.story.append(f"  (could not run: {error})")
         self.decisions += 1
         self.last_decision = time.monotonic()
         self.trace.add(
@@ -246,6 +254,7 @@ class Play:
             **about,
             "level": self.body.state.get("level"),
             "state": self.digest([]) if self.body.state else "",
+            "recent": list(self.story),
             "trace": str(self.trace.session_dir / "trace.jsonl"),
             "library_errors": self.library.errors,
         }

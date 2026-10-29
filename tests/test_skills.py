@@ -195,6 +195,10 @@ async def test_play_decides_retries_and_writes_tickets(cfg, library, tmp_path):
     await play.decide(["attack grunt#31 failed: path blocked"])  # not the player's: no ticket
     tickets = list((tmp_path / "tickets").glob("*.json"))
     assert [json.loads(t.read_text())["order"] for t in tickets] == ["push them off"]
+    recent = json.loads(tickets[0].read_text())["recent"]
+    assert recent[-1].endswith(
+        'the player said "push them off the ridge" => nofit push them off | attack grunt#31'
+    )
     await asyncio.sleep(0)
     await client.aclose()
     await trace.close()
