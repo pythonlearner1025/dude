@@ -75,7 +75,7 @@ class Play:
         self.traced_state = 0.0
         self.last_frame = 0.0
         self.framing = False
-        self.head = self._git("rev-parse", "--short", "HEAD")
+        self.head = self.library.head()
         self.on_learned: Callable[[str], None] | None = None  # Kevin tells the player
 
     # ---------- the game's side
@@ -109,21 +109,25 @@ class Play:
             if fresh and fresh.code != running.skill.code:
                 if self.runner.start(running.skill.name, running.args) is None:
                     restarted = running.skill.name
-        head = self._git("rev-parse", "--short", "HEAD")
+        head = self.library.head()
         self.trace.add(
             "library",
             {
-                "head": head,
+                "head": head[:7],
                 "skills": sorted(self.library.skills),
                 "errors": self.library.errors,
                 "restarted": restarted,
             },
         )
-        if head and head != self.head:
-            self.head = head
-            subject = re.sub(r"\s*\([^()]*\)$", "", self._git("log", "-1", "--format=%s"))
-            if subject and self.on_learned:
-                self.on_learned(subject)
+        if self.head and head and head != self.head:
+            # (what changed for the player: commits to skills or the actor's prompt, not notes)
+            subjects = self._git(
+                "log", "--format=%s", f"{self.head}..{head}", "--", "skills/*.py", "actor/*.md"
+            )
+            said = [re.sub(r"\s*\([^()]*\)$", "", line) for line in subjects.splitlines()]
+            if said and self.on_learned:
+                self.on_learned("; ".join(said))
+        self.head = head
 
     def _trace_state(self) -> None:
         me, player = self.body.me, self.body.player

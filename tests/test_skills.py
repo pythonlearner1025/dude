@@ -307,7 +307,7 @@ def test_coach_looks_on_a_heartbeat(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_play_restarts_a_changed_skill_and_tells_the_player(cfg, tmp_path):
+async def test_play_loads_commits_restarts_changed_skills_and_tells_the_player(cfg, tmp_path):
     import subprocess
 
     lib = tmp_path / "lib"
@@ -329,12 +329,18 @@ async def test_play_restarts_a_changed_skill_and_tells_the_player(cfg, tmp_path)
     play.on_state(state())
     play.runner.start("follow", {})
     before = play.runner.current
-    path.write_text(SKILLS.replace("k.follow()", "k.stay()"))
-    os.utime(path, (time.time() + 5, time.time() + 5))
+    path.write_text(SKILLS.replace("k.follow()", "k.stay()"))  # the coach, mid-edit
+    play.on_state(state())
+    assert play.runner.current is before  # not loaded: not committed, maybe not tested
     subprocess.run([*commit, "I hold where I am instead of following (s-002)"], check=True)
     play.on_state(state())
     assert play.runner.current is not before and "k.stay()" in play.runner.current.skill.code
     assert learned == ["I hold where I am instead of following"]
+    (lib / "notes.md").write_text("notes")
+    subprocess.run(["git", "-C", str(lib), "add", "-A"], check=True)
+    subprocess.run([*commit, "Nothing to change this time (s-003)"], check=True)
+    play.on_state(state())
+    assert learned == ["I hold where I am instead of following"]  # notes only: nothing to say
     await asyncio.sleep(0)
     await client.aclose()
     await trace.close()

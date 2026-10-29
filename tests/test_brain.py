@@ -523,3 +523,18 @@ async def test_coop_speaks_to_player_and_silence_only(cfg, tmp_path):
     b.reflect_task.cancel()
     await client.aclose()
     await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_kevins_next_line_carries_what_the_coach_changed(cfg, tmp_path):
+    b, _, trace, client = make(cfg, tmp_path)
+    b.memory.feed = ["John: move up"]
+    b.learned = "I keep pushing ahead while you walk"
+    assert (
+        "what you've just changed about how you fight beside them: I keep pushing ahead"
+        in (b.messages()[-1]["content"])
+    )
+    await b.say(trace.new_span("test"))
+    assert b.learned == "" and "just changed" not in b.messages()[-1]["content"]
+    await client.aclose()
+    await trace.close()

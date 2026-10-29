@@ -69,6 +69,7 @@ class Library:
         self.skills: dict[str, Skill] = {}
         self.errors: dict[str, str] = {}
         self._stamp: tuple = ()
+        self._head = ""
         self.load()
 
     def stamp(self) -> tuple:
@@ -77,11 +78,30 @@ class Library:
         )
         return tuple((p.name, p.stat().st_mtime_ns) for p in files)
 
+    def head(self) -> str:
+        """The library's commit, read from .git (cheap enough for every game state); "" when the
+        library isn't a git repo."""
+        git = self.directory / ".git"
+        try:
+            ref = (git / "HEAD").read_text().strip()
+            if not ref.startswith("ref: "):
+                return ref
+            loose = git / ref[5:]
+            if loose.exists():
+                return loose.read_text().strip()
+            packed = (git / "packed-refs").read_text().splitlines()
+            return next((line.split()[0] for line in packed if line.endswith(" " + ref[5:])), "")
+        except OSError:
+            return ""
+
     def changed(self) -> bool:
-        return self.stamp() != self._stamp
+        """A new commit (the coach's edits count once they're tested and committed); outside git,
+        any change to the files."""
+        head = self.head()
+        return head != self._head if head else self.stamp() != self._stamp
 
     def load(self) -> None:
-        self._stamp = self.stamp()
+        self._stamp, self._head = self.stamp(), self.head()
         loaded: dict[str, Skill] = {}
         for path in sorted(self.directory.glob("skills/*.py")):
             _loading.clear()

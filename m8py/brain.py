@@ -158,6 +158,7 @@ class Brain:
         # answers in about a second without thinking, beside Voice.
         self.reflect_thinks = cfg.kev is not None
         self.instruction = ""
+        self.learned = ""  # what the coach just changed, until Kevin has said it
         if cfg.p2p:
             self.set_instruction("", force=True)
         self.validator = Validator(
@@ -291,6 +292,11 @@ class Brain:
             self.situation(),
             *self.memory.feed[newest:],
         ]
+        if self.learned:
+            volatile.append(
+                f"(In this line, also tell {self.player()} in a few words, your own way, what "
+                f"you've just changed about how you fight beside them: {self.learned})"
+            )
         turns.append(["user", "\n\n".join(volatile)])
         self.trace.set_prompt("\n\n".join(f"[{r}]\n{t}" for r, t in turns))
         return [{"role": r, "content": t} for r, t in turns]
@@ -327,9 +333,10 @@ class Brain:
                             break
                     await self.on_events(events, quiet)
                 elif isinstance(item, Learned):
-                    # (a quiet moment's event: Kevin speaks of it unless he just spoke)
-                    text = f"Kevin has just changed how he plays, from watching you: {item.what}"
-                    await self.on_events([Event(text, True)], quiet=True)
+                    # Kevin's next line carries it: now, unless he just spoke
+                    self.learned = item.what
+                    self.trace.add("event", {"text": f"(the coach changed Kevin: {item.what})"})
+                    await self.respond(False, self.trace.new_span("learned"), quiet=True)
                 elif isinstance(item, Saved):
                     await self.on_saved(item.ident)
                 elif isinstance(item, Loaded):
@@ -877,6 +884,7 @@ class Brain:
     async def say(self, span: Span) -> bool:
         name = self.cfg.mate.name
         messages = self.messages()
+        self.learned = ""
         request = {
             "messages": messages,
             "temperature": self.cfg.llm.temperature,
