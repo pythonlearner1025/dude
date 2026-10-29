@@ -25,7 +25,7 @@ def follow(k):
         yield
 
 
-@skill(when="shoot a target until it dies", args={"target": "enemy"}, tags=("core",))
+@skill(when='shoot a target until it dies: "shoot it"', args={"target": "enemy"}, tags=("core",))
 def attack(k, target):
     while k.alive(target):
         k.shoot(target)
@@ -81,7 +81,7 @@ def test_library_catalog_and_hot_reload(library, tmp_path):
         assert [s.name for s in library.catalog({"combat"})] == ["follow", "attack", "flank"]
     finally:
         skills.MAX_CATALOG = saved
-    assert library.skills["flank"].line().startswith("flank(target, side=right)  go around")
+    assert library.skills["flank"].line().startswith("flank(target, side='right')  go around")
     assert not library.changed()
     path = tmp_path / "skills" / "basic.py"
     path.write_text("syntax error here (")
@@ -183,12 +183,15 @@ async def test_play_decides_retries_and_writes_tickets(cfg, library, tmp_path):
     body = requests[0]
     assert body["provider"] == {"only": ["together"], "allow_fallbacks": False}
     assert body["reasoning"] == {"enabled": False}
-    assert "flank(target, side=right)" in body["messages"][0]["content"]
+    assert "flank(target, side='right')" in body["messages"][0]["content"]
     assert "grunt#31 10 m" in body["messages"][1]["content"]
     assert "Orders: hold fire." in body["messages"][1]["content"]
     assert "could not run" in requests[1]["messages"][1]["content"]
     await play.decide(['the player said "push them off the ridge"'])
-    answers = iter(["nofit go to the pod | attack grunt#31"])
+    answers = iter(
+        ["nofit shoot it now | attack grunt#31", "nofit go to the pod | attack grunt#31"]
+    )
+    await play.decide(['the player said "shoot it now"'])  # attack's phrases cover it: no ticket
     await play.decide(["attack grunt#31 failed: path blocked"])  # not the player's: no ticket
     tickets = list((tmp_path / "tickets").glob("*.json"))
     assert [json.loads(t.read_text())["order"] for t in tickets] == ["push them off"]

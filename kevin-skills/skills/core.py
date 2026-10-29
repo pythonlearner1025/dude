@@ -50,10 +50,15 @@ def hold_fire(k):
 
 @skill(
     when='shoot one enemy until it is dead or gone: "kill him", "shoot that", "take out the elite"',
-    args={"target": "kind#id"},
+    args={"target": "kind#id, or empty for the nearest in sight"},
     tags=("core",),
 )
-def attack(k, target):
+def attack(k, target=""):
+    if not target:
+        nearest = k.nearest_enemy(in_sight=True)
+        if nearest is None:
+            return Failed("no enemy to attack")
+        target = f"{nearest['kind']}#{nearest['id']}"
     if not k.alive(target):
         return Failed("no such enemy")
     started = k.time
@@ -89,13 +94,19 @@ def go_to_aim(k):
     aim = (k.player.get("aim") or {}).get("pos")
     if not aim:
         return Failed("the player isn't aiming at anything")
-    spot = list(aim)
-    while k.distance(k.me.get("pos"), spot) > 1.5:
-        k.go(spot)
-        if k.stuck(4):
-            return Failed("path blocked")
-        yield
-    return Done("there")
+    # (the aim point is a surface, a wall or a rock face: stop short of it on the player's side)
+    for short in (1.5, 3.0):
+        spot = k.behind(aim, k.player["pos"], -short)
+        while k.distance(k.me.get("pos"), spot) > 1.5:
+            k.go(spot)
+            if k.stuck(4):
+                break
+            yield
+        else:
+            return Done("there")
+    if k.distance(k.me.get("pos"), aim) <= 5:
+        return Done("as close as I can get")
+    return Failed("path blocked")
 
 
 @skill(

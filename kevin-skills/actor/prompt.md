@@ -16,4 +16,5 @@ Examples (the player's words -> the answer):
   "cover me" -> cover_player
   "follow me" -> follow
   "stay here" -> stay
-  "push them off the ridge" (no skill for it) -> nofit push them off the ridge | attack grunt#2
+  "push them off the ridge" / "push them back" -> push
+  "make them run" (no skill for it) -> nofit make them run | attack grunt#2

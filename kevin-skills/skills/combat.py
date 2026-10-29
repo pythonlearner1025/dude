@@ -5,10 +5,15 @@ from m8py.skills import Done, Failed, skill
 
 @skill(
     when='go around an enemy and hit it from one side: "flank right", "go around", "hit them from the left"',
-    args={"target": "kind#id", "side": "left or right, as the player sees it"},
+    args={"target": "kind#id, or empty for the nearest in sight", "side": "left or right, as the player sees it"},
     tags=("combat",),
 )
-def flank(k, target, side="right"):
+def flank(k, target="", side="right"):
+    if not target:
+        nearest = k.nearest_enemy(in_sight=True)
+        if nearest is None:
+            return Failed("no enemy to flank")
+        target = f"{nearest['kind']}#{nearest['id']}"
     started = k.time
     for metres in (12, 7):  # wide first, then tighter if that side is blocked
         while k.alive(target):
@@ -16,7 +21,10 @@ def flank(k, target, side="right"):
                 return Failed("flank took too long")
             if k.me.get("health", 1) < 0.25:
                 return Failed("low health")
-            spot = k.side_point(k.enemy(target)["pos"], k.player["pos"], side, metres)
+            enemy = k.enemy(target)
+            if abs(enemy["pos"][2] - k.me.get("pos", enemy["pos"])[2]) > 4:
+                return Failed("can't reach it: it's above or below me")
+            spot = k.side_point(enemy["pos"], k.player["pos"], side, metres)
             if k.distance(k.me.get("pos"), spot) <= 2:
                 return (yield from k.run("attack", target=target))
             k.go(spot)
@@ -116,3 +124,21 @@ def cover_player(k):
         else:
             k.follow()
         yield
+
+
+@skill(
+    when='press forward and drive enemies back: "push them back", "push them off the ridge", "press the attack"',
+    args={"target": "kind#id, or empty for the nearest in sight"},
+    tags=("combat",),
+)
+def push(k, target=""):
+    started = k.time
+    while k.time - started < 60:
+        enemy = k.enemy(target) if target else k.nearest_enemy(in_sight=True)
+        if enemy is None:
+            return Done("pushed them back" if k.time > started else "no enemies to push")
+        result = yield from k.run("rush", target=f"{enemy['kind']}#{enemy['id']}")
+        if target or (isinstance(result, Failed) and result.reason == "low health"):
+            return result
+        yield
+    return Failed("still enemies after a minute")

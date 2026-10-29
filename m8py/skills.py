@@ -39,7 +39,7 @@ class Skill:
     def line(self) -> str:
         params = inspect.signature(self.fn).parameters
         shown = [
-            name if p.default is inspect.Parameter.empty else f"{name}={p.default}"
+            name if p.default is inspect.Parameter.empty else f"{name}={p.default!r}"
             for name, p in list(params.items())[1:]
         ]
         return f"{self.name}({', '.join(shown)})  {self.when}"

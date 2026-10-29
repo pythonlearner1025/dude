@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import Any, Callable
 
@@ -30,9 +31,10 @@ RULES = (
     "Enemies are named kind#id (grunt#31). Protect the player; never shoot them.\n"
     "- Standing orders (hold fire, stay close, stay behind me) hold until the player changes "
     "them. A one-off order (flank him, go there, take that out) is over when its skill ends.\n"
-    "- nofit is only for something the player just asked, in their own words, that no skill "
-    "here can do. Never for a skill that failed, for an order that can't be done right now "
-    "(no such enemy: follow or keep), or for anything the player didn't say.\n"
+    "- When a skill's description matches what the player asked, answer with that skill, even "
+    "if it can't succeed right now (no enemies, no target): it will report why. nofit is only "
+    "for something the player just asked, in their own words, that no skill's description "
+    "matches; never for a skill that failed or for anything the player didn't say.\n"
     "- Don't start again a skill that just failed for the same reason; pick another or follow."
 )
 
@@ -219,6 +221,11 @@ class Play:
         if decision.kind == "invalid":
             return decision.error
         fresh = decision.order and decision.order not in self.ticketed
+        if decision.kind == "nofit" and decision.skill and decision.order:
+            # (the actor also says nofit for an order its skill names but can't do now)
+            phrases = re.findall(r'"([^"]+)"', self.library.skills[decision.skill].when)
+            if any(phrase.lower() in decision.order.lower() for phrase in phrases):
+                fresh = False
         if decision.kind == "nofit" and asked and fresh:
             self.ticketed.add(decision.order)
             self.ticket(
