@@ -17,6 +17,15 @@ CHAT_EXTRA="-np 2 -kvu" ./start-chat-qwen.sh          # Qwen3.5-9B + mmproj on :
 ./stop-all.sh                                    # stops only the model servers above
 ```
 
+**Skill mode** (the current one; `docs/design/kevin-skill-loop.html`): `./start-stack-skills.sh`
+(Gemma, Breeze, STT, ~18 GB), `M8PY_CONFIG=configs/b650s-skills.toml ./restart-m8py.sh`, and
+`./start-coach.sh`. The actor is DeepSeek V4.1 Flash on OpenRouter; its key is
+`~/m8work/notes/openrouter.env` (mode 600), which `start-m8py.sh` loads. Skills live in the git repo
+`~/m8work/kevin-skills` (seeded from `dude/kevin-skills`); tickets for the coach in
+`~/m8work/run/tickets`, with `<ticket>.log` and `<ticket>.result.md` beside each. The coach runs
+`claude -p` with Opus there, so Claude Code must be signed in (`claude`, then `/login`).
+`HALO_START_LEVEL=a30 ./halo` plays a campaign level at once, for tests without the menus.
+
 **Co-op mode** (Kevin is player 2, played by Open-P2P; no Kev): `./start-stack-coop.sh` (Gemma,
 Breeze, STT and `start-p2p.sh`, Open-P2P 600M, ~21.3 GB) then
 `M8PY_CONFIG=configs/b650s-coop.toml ./restart-m8py.sh`. The host's invite makes m8py run
