@@ -14,8 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-STATE_EVERY = 3.0  # seconds between state samples in the timeline, unless something changed
-MOVED = 3.0  # metres: a state sample sooner than STATE_EVERY when Kevin moved this far
+STATE_EVERY = 15.0  # seconds between state lines when nothing changes
 MAX_FRAMES = 12
 
 
@@ -54,6 +53,33 @@ def point(pos: Any) -> str:
     return f"({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})" if pos else "?"
 
 
+def gist(state: dict[str, Any]) -> tuple:
+    """What a state line says, coarsely: a new line only when this changes."""
+    kevin, player = state.get("kevin") or {}, state.get("player") or {}
+
+    def near(pos: Any) -> tuple:
+        return tuple(round(v / 2) for v in pos[:2]) if pos else ()
+
+    def tenth(value: Any) -> int:
+        return round(10 * (value if value is not None else 1))
+
+    return (
+        near(kevin.get("pos")),
+        kevin.get("activity"),
+        kevin.get("target"),
+        tenth(kevin.get("health")),
+        tenth(kevin.get("shields")),
+        near(player.get("pos")),
+        round((player.get("facing") or 0) / 30),
+        tenth(player.get("health")),
+        (player.get("aim") or {}).get("label"),
+        tuple(
+            (e.get("id"), round((e.get("distance_m") or 0) / 5)) for e in state.get("enemies") or []
+        ),
+        str(state.get("running", "")).split(" (for")[0],
+    )
+
+
 def build(
     trace: Path,
     start_ms: int,
@@ -76,7 +102,7 @@ def build(
         "friendly_fire": 0,
         "kevin_deaths": 0,
     }
-    level, last_state, last_pos = None, 0, None
+    level, last_state, last_gist = None, 0, None
     for row in rows:
         t, kind, data = int(row["t"]), row["kind"], row["data"]
         if kind == "heard" and data.get("text", "").strip():
@@ -151,12 +177,9 @@ def build(
             )
         elif kind == "state":
             level = data.get("level") or level
-            pos = (data.get("kevin") or {}).get("pos")
-            moved = (
-                pos and last_pos and abs(pos[0] - last_pos[0]) + abs(pos[1] - last_pos[1]) > MOVED
-            )
-            if t - last_state >= STATE_EVERY * 1000 or moved:
-                last_state, last_pos = t, pos
+            now = gist(data)
+            if now != last_gist or t - last_state >= STATE_EVERY * 1000:
+                last_state, last_gist = t, now
                 timeline.append(
                     {"t": t, "type": "state", **{k: v for k, v in data.items() if k != "level"}}
                 )
