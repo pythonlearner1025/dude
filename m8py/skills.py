@@ -35,6 +35,7 @@ class Skill:
     done: str = ""
     tags: tuple[str, ...] = ()
     source: str = ""
+    code: str = ""  # its source when loaded: a running skill restarts when this changes
 
     def line(self) -> str:
         params = inspect.signature(self.fn).parameters
@@ -71,9 +72,10 @@ class Library:
         self.load()
 
     def stamp(self) -> tuple:
-        return tuple(
-            (p.name, p.stat().st_mtime_ns) for p in sorted(self.directory.glob("skills/*.py"))
+        files = sorted(self.directory.glob("skills/*.py")) + sorted(
+            self.directory.glob("actor/*.md")
         )
+        return tuple((p.name, p.stat().st_mtime_ns) for p in files)
 
     def changed(self) -> bool:
         return self.stamp() != self._stamp
@@ -98,6 +100,10 @@ class Library:
             self.errors.pop(path.name, None)
             for found in _loading:
                 found.source = path.name
+                try:
+                    found.code = inspect.getsource(found.fn)
+                except (OSError, TypeError):
+                    pass
                 loaded[found.name] = found
         self.skills = loaded
 

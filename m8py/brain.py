@@ -42,6 +42,13 @@ class Event:
 
 
 @dataclass(slots=True)
+class Learned:
+    """The coach changed Kevin's skills; Kevin may tell the player what he does differently."""
+
+    what: str
+
+
+@dataclass(slots=True)
 class Saved:
     ident: str
 
@@ -63,7 +70,7 @@ class Summary:
     text: str
 
 
-Input = Heard | Event | Saved | Loaded | NewGame | Summary
+Input = Heard | Event | Learned | Saved | Loaded | NewGame | Summary
 
 
 def joint_options(
@@ -161,6 +168,8 @@ class Brain:
             if cfg.actor
             else None
         )
+        if self.play:
+            self.play.on_learned = lambda what: self.inputs.put_nowait(Learned(what))
         if hasattr(self.link, "add_state_observer"):
             self.link.add_state_observer(self._on_state)
 
@@ -317,6 +326,10 @@ class Brain:
                             self.waiting = more
                             break
                     await self.on_events(events, quiet)
+                elif isinstance(item, Learned):
+                    # (a quiet moment's event: Kevin speaks of it unless he just spoke)
+                    text = f"Kevin has just changed how he plays, from watching you: {item.what}"
+                    await self.on_events([Event(text, True)], quiet=True)
                 elif isinstance(item, Saved):
                     await self.on_saved(item.ident)
                 elif isinstance(item, Loaded):

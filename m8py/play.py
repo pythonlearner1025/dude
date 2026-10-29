@@ -9,6 +9,7 @@ on its own heartbeat (m8py/observe.py)."""
 from __future__ import annotations
 
 import asyncio
+import re
 import subprocess
 import time
 from typing import Any, Callable
@@ -74,6 +75,8 @@ class Play:
         self.traced_state = 0.0
         self.last_frame = 0.0
         self.framing = False
+        self.head = self._git("rev-parse", "--short", "HEAD")
+        self.on_learned: Callable[[str], None] | None = None  # Kevin tells the player
 
     # ---------- the game's side
 
@@ -81,21 +84,8 @@ class Play:
         if not isinstance(state.get("kevin"), dict):
             return
         self.body.update(state)
-        if self.runner.current is None and self.library.changed():
-            self.library.load()
-            head = subprocess.run(
-                ["git", "-C", str(self.library.directory), "rev-parse", "--short", "HEAD"],
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            self.trace.add(
-                "library",
-                {
-                    "head": head,
-                    "skills": sorted(self.library.skills),
-                    "errors": self.library.errors,
-                },
-            )
+        if self.library.changed():
+            self._reload()
         self.runner.tick()
         if self.body.outbox:
             outbox, self.body.outbox = self.body.outbox, []
@@ -104,6 +94,36 @@ class Play:
         if time.monotonic() - self.traced_state >= STATE_EVERY:
             self.traced_state = time.monotonic()
             self._trace_state()
+
+    def _git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(self.library.directory), *args], capture_output=True, text=True
+        ).stdout.strip()
+
+    def _reload(self) -> None:
+        """Loads the coach's changes at once; the running skill restarts if its code changed."""
+        self.library.load()
+        running, restarted = self.runner.current, None
+        if running:
+            fresh = self.library.skills.get(running.skill.name)
+            if fresh and fresh.code != running.skill.code:
+                if self.runner.start(running.skill.name, running.args) is None:
+                    restarted = running.skill.name
+        head = self._git("rev-parse", "--short", "HEAD")
+        self.trace.add(
+            "library",
+            {
+                "head": head,
+                "skills": sorted(self.library.skills),
+                "errors": self.library.errors,
+                "restarted": restarted,
+            },
+        )
+        if head and head != self.head:
+            self.head = head
+            subject = re.sub(r"\s*\([^()]*\)$", "", self._git("log", "-1", "--format=%s"))
+            if subject and self.on_learned:
+                self.on_learned(subject)
 
     def _trace_state(self) -> None:
         me, player = self.body.me, self.body.player

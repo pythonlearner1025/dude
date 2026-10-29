@@ -73,8 +73,10 @@ replace, don't append forever.
 1. `PYTHONPATH=/home/minjune/m8work/dude /home/minjune/m8work/dude/.venv/bin/python -m m8py.skilltest .`
    must print `ok`. It loads every skill, checks the `when` lines, runs each skill through
    calm, combat, dying-target and blocked situations, and runs `tests/`.
-2. `git add -A && git commit -m "<what changed> (<packet id>)"`, notes.md included. m8py
-   loads the new skills the next time no skill is running.
+2. `git add -A && git commit -m "<what Kevin now does differently> (<packet id>)"`, notes.md
+   included. Write the subject for the player: Kevin may say it aloud ("I keep pushing ahead
+   when you stop, off your line of fire"), so no file or function names in it. m8py loads the
+   commit at once, and restarts the running skill if you changed it.
 3. Write `result.md` in the packet's directory: two or three sentences for the session log,
    saying what you saw, what you changed, and what Kevin will now do (or that nothing needed
    changing).

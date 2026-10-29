@@ -303,3 +303,37 @@ def test_coach_looks_on_a_heartbeat(tmp_path):
     assert subprocess.run(log, cwd=library, capture_output=True, text=True).stdout == "fix\n"
     assert subprocess.run(log, cwd=other, capture_output=True, text=True).returncode != 0
     assert look(trace, library, out, 1, "m", "high", 30, str(claude)) == "waiting"  # seen it all
+
+
+@pytest.mark.asyncio
+async def test_play_restarts_a_changed_skill_and_tells_the_player(cfg, tmp_path):
+    import subprocess
+
+    lib = tmp_path / "lib"
+    (lib / "skills").mkdir(parents=True)
+    path = lib / "skills" / "basic.py"
+    path.write_text(SKILLS)
+    commit = ["git", "-C", str(lib), "-c", "user.name=c", "-c", "user.email=c@c", "commit", "-qam"]
+    subprocess.run(["git", "init", "-q", str(lib)], check=True)
+    subprocess.run(["git", "-C", str(lib), "add", "-A"], check=True)
+    subprocess.run([*commit, "seed"], check=True)
+    cfg.kev = None
+    cfg.actor = ActorConfig(model="m", library=lib)
+    trace = Trace(tmp_path / "logs")
+    trace.start()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: sse("keep")))
+    play = Play(cfg, Link(), trace, client, lambda: [], lambda t: t)
+    learned = []
+    play.on_learned = learned.append
+    play.on_state(state())
+    play.runner.start("follow", {})
+    before = play.runner.current
+    path.write_text(SKILLS.replace("k.follow()", "k.stay()"))
+    os.utime(path, (time.time() + 5, time.time() + 5))
+    subprocess.run([*commit, "I hold where I am instead of following (s-002)"], check=True)
+    play.on_state(state())
+    assert play.runner.current is not before and "k.stay()" in play.runner.current.skill.code
+    assert learned == ["I hold where I am instead of following"]
+    await asyncio.sleep(0)
+    await client.aclose()
+    await trace.close()
