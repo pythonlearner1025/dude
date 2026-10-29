@@ -46,7 +46,7 @@ done
 kevin_log=$base/logs/kevin-client.log
 start_byte=$(( $(stat -c %s "$kevin_log" 2>/dev/null || echo 0) + 1 ))
 env HALO_NET_ADDRESS=127.0.0.3 HALO_MOUSE_SENSITIVITY=0.61091 HALO_NO_AUDIO=1 \
-    $base/dude/scripts-staging/kevin-client.sh "$(head -n 1 "$invite")"
+    $base/scripts/kevin-client.sh "$(head -n 1 "$invite")"
 client_pid=$(head -n 1 $base/run/kevin-client.pid)
 [[ $client_pid =~ ^[0-9]+$ ]] || { echo "bad Kevin PID" >&2; exit 1; }
 
