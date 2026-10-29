@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import ctypes
 import json
 import os
 import signal
@@ -102,6 +103,67 @@ def client_box(dpy, window):
     return {"left": origin.x, "top": origin.y, "width": geometry.width, "height": geometry.height}
 
 
+class Confinement:
+    """XFixes pointer barriers around Kevin's window, for where the game frees the cursor (menus,
+    loading, the scoreboard, lost focus); a game in relative mouse mode still reads every motion.
+    They stop most moves out, not all (diagonals slip through), so clicks are also only pressed
+    inside the window, and the pointer is put back when it leaves."""
+
+    def __init__(self, display_name):
+        self.x11, self.xfixes = ctypes.CDLL("libX11.so.6"), ctypes.CDLL("libXfixes.so.3")
+        self.x11.XOpenDisplay.restype = ctypes.c_void_p
+        self.x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        self.x11.XFlush.argtypes = [ctypes.c_void_p]
+        self.x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        self.xfixes.XFixesQueryVersion.argtypes = [ctypes.c_void_p] + [ctypes.POINTER(ctypes.c_int)] * 2
+        self.xfixes.XFixesCreatePointerBarrier.restype = ctypes.c_ulong
+        self.xfixes.XFixesCreatePointerBarrier.argtypes = [ctypes.c_void_p, ctypes.c_ulong] + \
+            [ctypes.c_int] * 6 + [ctypes.c_void_p]
+        self.xfixes.XFixesDestroyPointerBarrier.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        self.dpy = self.x11.XOpenDisplay(display_name.encode())
+        if not self.dpy:
+            raise RuntimeError(f"cannot open display {display_name}")
+        major, minor = ctypes.c_int(5), ctypes.c_int(0)
+        self.xfixes.XFixesQueryVersion(self.dpy, ctypes.byref(major), ctypes.byref(minor))
+        if major.value < 5:
+            raise RuntimeError("the X server has no pointer barriers (XFixes 5)")
+        self.root = self.x11.XDefaultRootWindow(self.dpy)
+        self.barriers, self.box = [], None
+
+    def set(self, box):
+        if box == self.box:
+            return
+        for barrier in self.barriers:
+            self.xfixes.XFixesDestroyPointerBarrier(self.dpy, barrier)
+        left, top = box["left"], box["top"]
+        right, bottom = left + box["width"] - 1, top + box["height"] - 1
+        m = 16  # overlapping at the corners, so a diagonal move can't slip between two
+        segments = ((left, top - m, left, bottom + m), (right, top - m, right, bottom + m),
+            (left - m, top, right + m, top), (left - m, bottom, right + m, bottom))
+        self.barriers = [self.xfixes.XFixesCreatePointerBarrier(self.dpy, self.root, *segment, 0, 0, None)
+            for segment in segments]
+        self.x11.XFlush(self.dpy)
+        self.box = box
+
+    def close(self):
+        self.x11.XCloseDisplay(self.dpy)  # the server removes the barriers with the connection
+
+
+def over(dpy, window, box):
+    """Whether the pointer is on Kevin's window: in its box, with no other window on top there."""
+    pointer = dpy.screen().root.query_pointer()
+    x, y = pointer.root_x, pointer.root_y
+    in_box = box["left"] <= x < box["left"] + box["width"] and box["top"] <= y < box["top"] + box["height"]
+    return in_box and pointer.child.id in ancestors(window)
+
+
+def centre(dpy, box):
+    dpy.screen().root.warp_pointer(box["left"] + box["width"] // 2, box["top"] + box["height"] // 2)
+    dpy.flush()
+
+
 class Input:
     def __init__(self, scale):
         capabilities = {
@@ -113,9 +175,9 @@ class Input:
         self.keys = set()
         self.buttons = set()
 
-    def apply(self, action):
+    def apply(self, action, clicks=True):
         current_keys = {MOVES.get(key, key) for key in action.keys} & KEYS.keys()
-        current_buttons = set(action.mouse_action.buttons_down) & BUTTONS.keys()
+        current_buttons = set(action.mouse_action.buttons_down) & BUTTONS.keys() if clicks else set()
         for name in current_keys - self.keys:
             self.device.write(e.EV_KEY, KEYS[name], 1)
         for name in self.keys - current_keys:
@@ -124,6 +186,9 @@ class Input:
             self.device.write(e.EV_KEY, BUTTONS[name], 1)
         for name in self.buttons - current_buttons:
             self.device.write(e.EV_KEY, BUTTONS[name], 0)
+        # Presses first, on their own: libinput moves the pointer before a button of the same
+        # report, which could press outside the window the pointer was checked to be in.
+        self.device.syn()
         mouse = action.mouse_action
         if mouse.HasField("mouse_delta_px"):
             dx = round(mouse.mouse_delta_px.x * self.scale)
@@ -173,6 +238,10 @@ async def run(args):
     if not window:
         raise RuntimeError("Kevin window not found")
 
+    box = client_box(dpy, window)
+    confinement = Confinement(args.display)
+    centre(dpy, box)
+    confinement.set(box)
     reader, writer = await asyncio.open_unix_connection(args.socket)
     injector = Input(args.mouse_scale)
     log_path = Path(args.log)
@@ -192,13 +261,14 @@ async def run(args):
         loop.add_signal_handler(sig, request_stop)
 
     async def capture():
-        nonlocal frame_id
+        nonlocal frame_id, box
         period = 1.0 / args.fps
         next_frame = time.monotonic()
         with mss.mss(display=args.display, with_cursor=True) as grabber:
             while not stop.is_set():
                 started_ns = time.monotonic_ns()
                 box = client_box(dpy, window)
+                confinement.set(box)
                 shot = grabber.grab(box)
                 rgb = Image.frombytes("RGB", shot.size, shot.rgb)
                 rgb = rgb.resize((192, 192), Image.Resampling.HAMMING)
@@ -235,9 +305,10 @@ async def run(args):
             received_ns = time.monotonic_ns()
             timing = send_times.pop(action.id, None)
             has_focus = focused(dpy, window)
+            pointer_inside = over(dpy, window, box)
             injected_ns = received_ns
             if has_focus:
-                injector.apply(action)
+                injector.apply(action, clicks=pointer_inside)
                 injected_ns = time.monotonic_ns()
             else:
                 injector.release()
@@ -246,8 +317,11 @@ async def run(args):
                     subprocess.Popen(["xdotool", "windowactivate", str(window.id)],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     next_focus = time.monotonic() + 0.5
+            if not over(dpy, window, box):
+                centre(dpy, box)
             entry = {"event": "action", "id": action.id, "keys": list(action.keys),
                 "buttons": list(action.mouse_action.buttons_down), "focused": has_focus,
+                "inside": pointer_inside,
                 "mouse": [action.mouse_action.mouse_delta_px.x, action.mouse_action.mouse_delta_px.y],
                 "inject_ms": (injected_ns-received_ns)/1e6}
             if timing:
@@ -271,6 +345,7 @@ async def run(args):
             task.cancel()
         await asyncio.gather(*locals().get("tasks", []), return_exceptions=True)
         injector.close()
+        confinement.close()
         writer.close()
         await writer.wait_closed()
         log.close()
