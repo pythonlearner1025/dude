@@ -382,3 +382,31 @@ shot and killed a grunt 6 m ahead.
     the "New objective" event ("Evade the Covenant patrols…"). 37 of 47 Reflect runs were
     interrupted by Voice; completed ones took 7.2 s (median).
 11. Before the level, off-game talk became an order again (cleared by `new_game`).
+
+## 11. Co-op mode: Open-P2P plays Kevin as player 2 (end-to-end check, no playtest yet)
+
+The architecture the user chose after §10: Kevin is player 2 in the user's co-op game, in his own
+native Halo on b650s, played by Open-P2P 600M from his frames with the user's keyboard and mouse.
+Kev is gone (it no longer has actions to pick, and Open-P2P needs its VRAM). Voice answers every
+non-noise player line and long silences; Reflect runs on each such line, without thinking and
+beside Voice, and writes Open-P2P's one-line instruction (`configs/b650s-coop.toml`,
+`infra/b650s/kevin-coop.sh`, `tools/p2p/`).
+
+- *Chain (browser host on b650s, Codex):* page load → invite 4.3 s, invite → Kevin joined and game
+  started 6.7 s; typed lines answered (first token 0.44 / 1.13 s) and turned into "follow the
+  player" / "move forward and shoot the enemies".
+- *Reflect latency:* the instruction came last in ~77 tokens of JSON, generated at ~25 tok/s
+  beside Voice and TTS: 2.9 and 4.5 s. With the instruction first and streamed, it reached
+  Open-P2P 0.97 s after the line (the whole Reflect still 2.9 s).
+- *Every level:* a hidden local host and Kevin's client got into a30, a50, b30, b40, c10, c20, c40,
+  d20 and d40 within 9-45 s. a10 opens with a long cutscene: Kevin was still unspawned after 60 s.
+- *Kevin's mouse left his window.* Halo frees the cursor in menus, loading and without focus, so the
+  model's motion moved a real cursor and its clicks could land on other windows. Also, the client
+  picked the largest window titled "Halo" as well as Kevin's PID, so a browser host won. Now: PID
+  only; before each step the pointer goes back to the middle of Kevin's window if it is not over
+  it, and presses go in their own input report before the motion. In 60 s live: pointer outside
+  in 0 of 593 samples, 1,349 actions all over his window, no press outside. (XFixes pointer
+  barriers leaked ~10% of diagonal steps on Xvfb and then trapped the pointer outside; dropped.)
+- *Open-P2P zero-shot:* still the weak part. Arrow keys now map to WASD (Halo moves only with WASD;
+  the model often pressed arrows), and an empty instruction now returns it to free play (`<none>`
+  on its stdin, `tools/p2p/open-p2p.patch`).
