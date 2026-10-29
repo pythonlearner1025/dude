@@ -76,3 +76,42 @@ VLA from the latest frame (42% → 97% on dynamic tasks with ~10 minutes of onli
 - **OpenCE Halo** (our build): open engine, so we can render a second point of view, read exact
   state for rewards, and run several instances in parallel. Commercial games only run in real
   time.
+
+## 4. Can a Jev-style decision model learn what we want?
+
+**What Kev actually is.** [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) is a general decision
+model by Jared Palmer, not a game model: a LoRA (rank 16) on a frozen Qwen3.5-4B-Base with a pointer
+head that scores each option against the question. It was trained on ~35k records (public
+classification sets, policy rules, finance complaints, code review), with no game data. m8 uses it
+zero-shot. Its card: 0.69 vs Jev's 0.76 on 14 held-out datasets, MMLU-Pro 0.57 vs 0.84, date
+arithmetic 0.65; "largest gains are in-distribution"; option order can change answers.
+
+**Generalisation evidence.** [S1MB](https://huggingface.co/blog/hotchpotch/system-one-mosaic-benchmark)
+has six probes with freely varied instructions and contexts (task average): Jev 1.13 96, Open-Jev-9B 86,
+kev-9b 85, **kev-4b 78**, OpenJev-2B 64, kev-0.8b 51. A 400M model trained on the benchmark's own
+domains ranks 2nd overall but scores 54 on the probes: small models learn their training domain,
+and following new instructions grows with size. [Releasing the Inner Jev](https://arxiv.org/abs/2610.17205)
+(Oct 2026) finds an untrained open LLM read through its answer-letter logits already near Jev
+(Gemma 4 31B: 79.6 vs 80.1), and LoRA + head fine-tuning passes it (84.4): decision quality is
+mostly the base model's understanding; the head adds speed and calibration.
+
+**For us.** A decision model can learn "which offered action and target fits this order in this
+state" if fine-tuned on labelled game decisions (Kev's code is open: github.com/jaredpalmer/kev).
+It cannot do what isn't an option (no action for "flank right"), plan sequences, remember, output
+continuous control, or (Kev) see images. Its role is a fast selector/router, not a body.
+
+## 5. Computer-use models
+
+- **Standard Intelligence [FDM-1](https://si.inc/posts/fdm1/)** is the nearest thing to a general
+  human-like action model: trained on 11M hours of screen video labelled by an inverse dynamics
+  model (itself trained on 40k contractor hours), keyboard/mouse tokens from 30 fps video, 11 ms
+  capture-to-action, and fine-tuned to steer a real car with under an hour of data. No language
+  model transfer (so no text instructions), size undisclosed, **weights not released**.
+- **Open computer-use agents** (UI-TARS-1.5-7B, OpenCUA-7B/32B/72B, GUI-Owl-7B, EvoCUA-8B/32B at
+  56.7% OSWorld, Fara-7B) take a screenshot and emit one click/type/hotkey per step, seconds per
+  step, 15-100 steps per task. They are not real-time controllers (no continuous mouse, no aiming)
+  and are trained on desktop GUIs, not 3D games. Useful pieces: their **grounding** (pointing at
+  "the big rock" in a screenshot, which the engine can turn into a world position).
+- **Best open fits by role:** body → Open-P2P (open, text-conditioned, keyboard/mouse at 20 Hz);
+  game-video labelling → [Reka IDM](https://huggingface.co/RekaAI/Reka-Inverse-Dynamics-Model) /
+  VPT; fast selector → a game-fine-tuned Kev-4B/9B or Open-Jev-9B; pointing → a GUI grounding model.
