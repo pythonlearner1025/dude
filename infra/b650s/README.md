@@ -25,7 +25,10 @@ CHAT_EXTRA="-np 2 -kvu" ./start-chat-qwen.sh          # Qwen3.5-9B + mmproj on :
 `~/m8work/run/tickets`, with `<ticket>.log` and `<ticket>.result.md` beside each. The coach runs
 `claude -p` with Opus there: the current Claude Code in `~/.npm-global/bin` (the one in
 `/usr/local` is 2.0.1), signed in with a one-year token from `claude setup-token` kept in
-`~/m8work/notes/claude-coach.env` (mode 600), which `start-coach.sh` loads.
+`~/m8work/notes/claude-coach.env` (mode 600), which `start-coach.sh` loads. It runs apart from
+this machine's personal Claude Code setup (project settings only, the personal CLAUDE.md excluded,
+no skills or MCP, six tools): see `ISOLATED` in `m8py/coach.py`. Each `<ticket>.log` is
+stream-json; `python3 ~/m8work/dude/tools/coach_log.py <ticket>.log` shows the steps.
 `HALO_START_LEVEL=a30 ./halo` plays a campaign level at once, for tests without the menus.
 
 **Co-op mode** (Kevin is player 2, played by Open-P2P; no Kev): `./start-stack-coop.sh` (Gemma,
