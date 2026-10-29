@@ -486,6 +486,18 @@ commits. The game gained `go_point` (to the metre), health numbers and `HALO_STA
   "the game runs one commit behind"; now only commits load. Kevin never really said what
   changed (the change was one more feed line); now his next line must carry it. Frames (89, 24
   KB) caused no state stalls; the only gaps were Kevin's deaths.
+- *Third playtest (a50, a new map, 12:33-12:40, 234 decisions, median 201 ms):* commits now
+  load within a second, and Kevin says each change in his own words ("from now on, when you tell
+  me to 'go in', I'm moving straight onto their teeth"). Six looks found what was new on this
+  map: "move in there" / "go in" answered `keep` (now `clear_area`), Kevin shooting empty
+  Covenant mounted guns ("don't destroy that"), firing 25 s at a grunt out of sight, freezing
+  while chasing hidden grunts (a `stand_up` every step reset Halo's walk), and falling back next
+  to an elite. About 1.5-2.5 min from a complaint to the fix live and announced. Kevin died 3
+  times. At 24% health (Halo CE never restores health, only shields) every fight failed "low
+  health" at once, and the actor bounced between `clear_area` and `take_cover` 20 times in 22 s;
+  Opus fixed the skills, and m8py now refuses to restart a skill that failed in the last 10 s
+  unless the player asks. Speech recognition still garbles orders ("Devin move in there",
+  "Heaven's a damn turret").
 - Open: Reflect's orders still pick up junk ("Stop.", Kevin's
   own lines). Halo's AI does the fine control, so tactics are only as precise as two decisions a
   second and the companion's order set allow; the player-2 body is the next step for that.

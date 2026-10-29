@@ -24,6 +24,7 @@ from .skills import Done, Failed, Library, Runner, Running
 from .trace import Trace
 
 HEARTBEAT = 3.0  # seconds between decisions while enemies are around, with nothing new
+RETRY_AFTER = 10.0  # seconds before a failed skill starts again, unless the player asks
 STATE_EVERY = 1.0  # seconds between state lines in the trace
 FRAME_EVERY = 10.0  # seconds between frames of the player's view, and after each player line
 FRAME_WIDTH = 640
@@ -75,6 +76,7 @@ class Play:
         self.traced_state = 0.0
         self.last_frame = 0.0
         self.framing = False
+        self.failed: dict[str, tuple[str, float]] = {}  # skill -> (why, when) of its last failure
         self.head = self.library.head()
         self.on_learned: Callable[[str], None] | None = None  # Kevin tells the player
 
@@ -205,6 +207,8 @@ class Play:
             "skill", {"skill": running.skill.name, "args": running.args, verb: result.reason}
         )
         print(f"[skill] {self.last}", flush=True)
+        if isinstance(result, Failed):
+            self.failed[running.skill.name] = (result.reason, time.monotonic())
         self.trigger(f"{running.display()} {verb}: {result.reason}")
 
     # ---------- deciding
@@ -276,14 +280,15 @@ class Play:
         system, user = self.system(), self.digest(reasons)
         answer, ms, usage = await self.actor.ask(system, user)
         decision = parse(answer, self.library)
-        error = self.apply(decision)
+        asked = any(reason.startswith("the player said") for reason in reasons)
+        error = self.apply(decision, asked)
         retry = None
         if error:  # one more try, told why
             again = f'{user}\n\nYour answer "{answer}" could not run: {error}. Answer again.'
             retry, more, _ = await self.actor.ask(system, again)
             ms += more
             decision = parse(retry, self.library)
-            error = self.apply(decision)
+            error = self.apply(decision, asked)
         self.last_decision = time.monotonic()
         self.trace.add(
             "decision",
@@ -303,12 +308,17 @@ class Play:
         print(f"[actor] {retry or answer} ({ms} ms) <- {' / '.join(reasons)[:120]}", flush=True)
         return decision
 
-    def apply(self, decision: Decision) -> str | None:
-        """Starts the decided skill; an error message if it can't."""
+    def apply(self, decision: Decision, asked: bool = True) -> str | None:
+        """Starts the decided skill; an error message if it can't. A skill that failed moments
+        ago doesn't start again unless the player asks: the actor would loop on it."""
         if decision.kind == "keep":
             return None
         if decision.kind == "invalid":
             return decision.error
+        why, when = self.failed.get(decision.skill or "", ("", -RETRY_AFTER))
+        if not asked and time.monotonic() - when < RETRY_AFTER:
+            ago = time.monotonic() - when
+            return f"{decision.skill} failed {ago:.0f} s ago ({why}); pick something else"
         if decision.skill:
             return self.runner.start(decision.skill, decision.args)
         return None

@@ -344,3 +344,23 @@ async def test_play_loads_commits_restarts_changed_skills_and_tells_the_player(c
     await asyncio.sleep(0)
     await client.aclose()
     await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_skill_waits_unless_the_player_asks(cfg, library, tmp_path):
+    answers = iter(["flank grunt#31", "follow", "flank grunt#31"])
+    cfg.kev = None
+    cfg.actor = ActorConfig(model="m", library=library.directory)
+    trace = Trace(tmp_path / "logs")
+    trace.start()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: sse(next(answers))))
+    play = Play(cfg, Link(), trace, client, lambda: [], lambda t: t)
+    play.on_state(state())
+    play.runner.start("flank", {"target": "grunt#31"})
+    play.on_state(state())  # no grunt: flank fails at once
+    await play.decide(["flank grunt#31 failed: no such enemy"])  # the actor loops: refused
+    assert play.runner.current.skill.name == "follow"
+    await play.decide(['the player said "flank him"'])  # the player asks: allowed
+    assert play.runner.current.skill.name == "flank"
+    await client.aclose()
+    await trace.close()
