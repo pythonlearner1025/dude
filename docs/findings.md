@@ -411,3 +411,38 @@ beside Voice, and writes Open-P2P's one-line instruction (`configs/b650s-coop.to
 - *Open-P2P zero-shot:* still the weak part. Arrow keys now map to WASD (Halo moves only with WASD;
   the model often pressed arrows), and an empty instruction now returns it to free play (`<none>`
   on its stdin, `tools/p2p/open-p2p.patch`).
+
+## 12. Skill mode: an LLM actor picks skills, Opus in Claude Code writes them (end-to-end, no playtest yet)
+
+What was built (design: `docs/design/kevin-skill-loop.html`): Kev is replaced by an actor,
+DeepSeek V4.1 Flash on Together through OpenRouter (reasoning off), that answers one line per
+decision: a skill and its arguments, `keep`, or `nofit`. Skills are Python generators in a git
+repo on b650s (`~/m8work/kevin-skills`, seeded from `kevin-skills/`); m8py runs the current one a
+step per game state (two a second; Halo's own AI walks and shoots for each step's commands) and
+loads library commits between skills. Tickets (`~/m8work/run/tickets`) go to the coach, Opus in
+Claude Code, which edits the library under `CLAUDE.md`, must pass `python -m m8py.skilltest`, and
+commits. The game gained `go_point` (to the metre), health numbers and `HALO_START_LEVEL`.
+
+- *Latency (native a30, typed orders):* 108 decisions, median 168 ms, p90 247 ms, max 733 ms;
+  in combat 47 decisions, median 219 ms, p90 394 ms. An order is in Halo ~0.25 s after the line.
+- *Orders (calm):* "get in front of me" → `lead` (a point 6 m ahead of the player), "hold your
+  fire" → `hold_fire` and back to `lead` (still in force), "get behind that rock" →
+  `behind_aim`, "follow me" → `follow`; chat and game events → `keep`.
+- *Orders (combat, a30 dropship):* "flank right and take out that grunt" → `flank grunt#30
+  right` (the grunt was still aboard the flying dropship, so Kevin chased its moving side point);
+  "clear the area" → `clear_area` until it handed back `low health`, then the actor chose
+  `take_cover` by itself; Kevin died to the landing elite and grunts.
+- *Actor misbehaviour found and fixed:* nofit for skill failures and orders it made up (7 junk
+  tickets), a one-off order kept in force from Reflect's orders, retries of a skill failing the
+  same way, nofit when no enemy was there to flank. Now: rules for standing vs one-off orders,
+  "pick the matching skill even if it can't succeed now", tickets only for the player's own lines
+  and only when the fallback skill doesn't quote their words. `tools/actor_probe.py` (the real
+  actor, no game): 17 of 18 lines right, the 18th an order no skill covers (nofit, correct).
+- *Coach loop, run by hand (Claude Code on b650s is signed out):* three real tickets → `go_to_aim`
+  stops short of walls (it failed 4 times aiming at the lifepod), a new `push` skill for "push
+  them off the ridge", `flank` refuses targets more than 4 m above or below, `flank`/`attack` take
+  the nearest enemy when none is named; tests added, skilltest ok, committed, results written.
+- *Open:* the coach worker (`m8py.coach`, `start-coach.sh`) needs `claude` signed in on b650s
+  (its 2.0.1 is old: 2.1.312 is current). Reflect's orders still pick up junk ("Stop.", Kevin's
+  own lines). Halo's AI does the fine control, so tactics are only as precise as two decisions a
+  second and the companion's order set allow; the player-2 body is the next step for that.
