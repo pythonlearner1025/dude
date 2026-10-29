@@ -33,6 +33,15 @@ class EndpointConfig:
 
 
 @dataclass(slots=True)
+class P2PConfig:
+    """Co-op mode: Kevin is player 2 and Open-P2P plays him from `instruction`, which Reflect
+    writes. `launch` is run with the host's invite link to start Kevin's game and Open-P2P."""
+
+    instruction: Path
+    launch: Path | None = None
+
+
+@dataclass(slots=True)
 class ModelsConfig:
     silero_vad: Path
 
@@ -67,10 +76,11 @@ class Config:
     mate: MateConfig
     mic: MicConfig
     stt: EndpointConfig
-    kev: EndpointConfig
     llm: EndpointConfig
     models: ModelsConfig
     game: GameConfig
+    kev: EndpointConfig | None = None  # none in co-op mode: Open-P2P plays Kevin
+    p2p: P2PConfig | None = None
     site: SiteConfig = field(default_factory=SiteConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
     log: LogConfig = field(default_factory=LogConfig)
@@ -98,11 +108,17 @@ class Config:
         models["silero_vad"] = resolved(models.get("silero_vad", "silero_vad.onnx"))
         logging = dict(raw.get("log", {}))
         logging["directory"] = resolved(logging.get("directory", "logs"))
+        p2p = dict(raw["p2p"]) if "p2p" in raw else None
+        if p2p:
+            p2p["instruction"] = resolved(p2p["instruction"])
+            if p2p.get("launch") is not None:
+                p2p["launch"] = resolved(p2p["launch"])
         return cls(
             mate=MateConfig(**mate),
             mic=MicConfig(**raw.get("mic", {})),
             stt=EndpointConfig(**raw["stt"]),
-            kev=EndpointConfig(**raw["kev"]),
+            kev=EndpointConfig(**raw["kev"]) if "kev" in raw else None,
+            p2p=P2PConfig(**p2p) if p2p else None,
             llm=EndpointConfig(**raw["llm"]),
             models=ModelsConfig(**models),
             game=GameConfig(**raw.get("game", {})),

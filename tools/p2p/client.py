@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import struct
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -31,6 +32,8 @@ KEYS = {
     "LeftShift": e.KEY_LEFTSHIFT, "RightShift": e.KEY_RIGHTSHIFT,
 }
 BUTTONS = {"0": e.BTN_LEFT, "1": e.BTN_RIGHT, "2": e.BTN_MIDDLE}
+# Halo moves only with WASD; zero-shot the model mostly pressed arrows to move (and stood still).
+MOVES = {"UpArrow": "w", "DownArrow": "s", "LeftArrow": "a", "RightArrow": "d"}
 MAX_RECORD = 1 << 20
 
 
@@ -111,7 +114,7 @@ class Input:
         self.buttons = set()
 
     def apply(self, action):
-        current_keys = set(action.keys) & KEYS.keys()
+        current_keys = {MOVES.get(key, key) for key in action.keys} & KEYS.keys()
         current_buttons = set(action.mouse_action.buttons_down) & BUTTONS.keys()
         for name in current_keys - self.keys:
             self.device.write(e.EV_KEY, KEYS[name], 1)
@@ -160,7 +163,7 @@ async def read_record(reader):
 
 async def run(args):
     dpy = display.Display(args.display)
-    pid = int(Path(args.window_pid_file).read_text().strip()) if args.window_pid_file else args.window_pid
+    pid = int(Path(args.window_pid_file).read_text().split()[0]) if args.window_pid_file else args.window_pid
     deadline = time.monotonic() + args.wait
     window = None
     while not window and time.monotonic() < deadline:
@@ -179,6 +182,7 @@ async def run(args):
     send_times = {}
     frame_id = 1
     latest_frame = asyncio.Queue(maxsize=1)
+    next_focus = 0.0
 
     def request_stop():
         stop.set()
@@ -225,6 +229,7 @@ async def run(args):
                 "send_ms": (sent_ns-captured_ns)/1e6}) + "\n")
 
     async def receiver():
+        nonlocal next_focus
         while not stop.is_set():
             action = proto.Action.FromString(await read_record(reader))
             received_ns = time.monotonic_ns()
@@ -236,6 +241,11 @@ async def run(args):
                 injected_ns = time.monotonic_ns()
             else:
                 injector.release()
+                # Openbox sometimes moves focus away; nothing else on this display needs it.
+                if args.keep_focus and time.monotonic() > next_focus:
+                    subprocess.Popen(["xdotool", "windowactivate", str(window.id)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    next_focus = time.monotonic() + 0.5
             entry = {"event": "action", "id": action.id, "keys": list(action.keys),
                 "buttons": list(action.mouse_action.buttons_down), "focused": has_focus,
                 "mouse": [action.mouse_action.mouse_delta_px.x, action.mouse_action.mouse_delta_px.y],
@@ -278,6 +288,7 @@ def main():
     parser.add_argument("--mouse-scale", type=float, default=1.0)
     parser.add_argument("--duration", type=float, default=0)
     parser.add_argument("--wait", type=float, default=30)
+    parser.add_argument("--keep-focus", action="store_true")
     parser.add_argument("--log", default="/home/minjune/m8work/p2p-test/actions.jsonl")
     args = parser.parse_args()
     if not args.window_pid and not args.window_pid_file and not args.window_title:

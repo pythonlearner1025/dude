@@ -144,6 +144,12 @@ class Brain:
         self.reflect_task: asyncio.Task[None] | None = None
         self.reflect_pending = False
         self._last_reflect = time.monotonic()
+        # With Kev, Reflect thinks for seconds and yields Gemma to Voice. Driving Open-P2P it
+        # answers in about a second without thinking, beside Voice.
+        self.reflect_thinks = cfg.kev is not None
+        self.instruction = ""
+        if cfg.p2p:
+            self.set_instruction("", force=True)
         self.validator = Validator(
             self.link.send_json, self._validator_changed, self._validator_failed
         )
@@ -191,6 +197,8 @@ class Brain:
         )
 
     def doing_text(self) -> str:
+        if self.cfg.p2p:
+            return f"Kevin's current action: {self.instruction or 'playing on his own'}"
         current = self.validator.current
         if not current:
             return "Kevin's current action: nothing (done)"
@@ -328,21 +336,30 @@ class Brain:
             self.validator.on_event(text)
             self.trace.add("event", {"text": text, "react": event.react, "state": self.state()})
         if any(e.react for e in events):
-            await self.respond(False, span)
+            await self.respond(False, span, quiet=quiet)
         else:
             span.set(spoke=False)
             span.finish()
 
-    async def respond(self, to_player: bool, span: Span, noise: bool = False) -> None:
+    async def respond(
+        self, to_player: bool, span: Span, noise: bool = False, quiet: bool = False
+    ) -> None:
         speech_finishes = False
         try:
             q = self.speaking.quiet_from()
             cooldown = not to_player and (
                 q is None or time.monotonic() < q + self.link.speech_cooldown
             )
-            span.mark("kev_start")
-            speak = await self.decide(to_player, cooldown, span, noise)
-            span.mark("kev_done")
+            if self.cfg.kev:
+                span.mark("kev_start")
+                speak = await self.decide(to_player, cooldown, span, noise)
+                span.mark("kev_done")
+            else:
+                # Nothing judges game events without Kev: answer the player, break silences.
+                speak = (to_player and not noise) or (quiet and not cooldown)
+                if to_player and not noise:
+                    self._request_reflect("the player spoke")
+                self.trace.add("decide", {"speak": speak, "noise": noise, "cooldown": cooldown})
             span.set(spoke=speak)
             if speak:
                 if self.speaking.is_speaking():
@@ -377,7 +394,8 @@ class Brain:
             self.reflect_log = self.reflect_log[len(self.reflect_log) // 2 :]
 
     def _reflect_heartbeat(self) -> None:
-        if self.memory.orders and time.monotonic() - self._last_reflect >= REFLECT_INTERVAL:
+        busy = self.memory.orders or self.instruction
+        if busy and time.monotonic() - self._last_reflect >= REFLECT_INTERVAL:
             self._request_reflect("orders heartbeat")
 
     def _request_reflect(self, reason: str) -> None:
@@ -389,55 +407,68 @@ class Brain:
     async def _reflect(self, reason: str) -> None:
         self._last_reflect = time.monotonic()
         started = time.monotonic()
+        system = (
+            "Maintain Kevin's durable orders and relationship memory. Orders are the standing "
+            "instructions the player has given Kevin that still apply: keep the player's "
+            "conditions and wording, add new ones, and drop ones the player cancelled or that "
+            "are finished. Ignore talk that is not addressed to Kevin. Remember holds only "
+            "lasting facts about the player or the relationship (names, preferences, promises); "
+            "never positions, health, ammo, targets or anything about the current moment, and "
+            "never what Kevin did. "
+        )
+        properties: dict[str, Any] = {
+            "orders": {"type": "array", "items": {"type": "string"}},
+            "remember": {"type": "array", "items": {"type": "string"}},
+        }
+        # The log comes before what changes between runs, so the server can reuse its prefix.
+        state = (
+            f"Summary:\n{self.memory.summary or 'none'}\n\nAppend-only log (newest last):\n"
+            + ("\n".join(self.reflect_log) or "none")
+            + f"\n\n{self.orders_text()}\n\n{self.remembers_text()}"
+        )
+        if self.cfg.p2p:
+            system += (
+                "Instruction is what Kevin's body does right now to carry out his orders and "
+                "the player's newest request: one short plain command such as \"follow the "
+                "player\", \"move forward\", \"shoot the enemies\" or \"take cover behind the "
+                "rocks\". Keep it unchanged while it still applies; leave it empty when there "
+                "is nothing to do but play along. Output JSON only with exactly: orders and "
+                "remember, each the full replacement list of short strings, and instruction."
+            )
+            properties["instruction"] = {"type": "string", "maxLength": 120}
+            state += f"\n\nInstruction now: {self.instruction or 'none'}"
+        else:
+            system += (
+                "Never send or propose a game action. Output JSON only with exactly: orders "
+                "and remember, each the full replacement list of short strings."
+            )
         request: dict[str, Any] = {
             "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Maintain Kevin's durable orders and relationship memory. Orders are "
-                        "the standing instructions the player has given Kevin that still apply: "
-                        "keep the player's conditions and wording, add new ones, and drop ones "
-                        "the player cancelled or that are finished. Ignore talk that is not "
-                        "addressed to Kevin. Remember holds only lasting facts about the player "
-                        "or the relationship (names, preferences, promises); never positions, "
-                        "health, ammo, targets or anything about the current moment, and never "
-                        "what Kevin did. Never send or propose a game action. Output JSON only "
-                        "with exactly: orders and remember, each the full replacement list of "
-                        "short strings."
-                    ),
-                },
+                {"role": "system", "content": system},
                 {
                     "role": "user",
-                    "content": (
-                        f"{self.orders_text()}\n\n{self.remembers_text()}"
-                        f"\n\nSummary:\n{self.memory.summary or 'none'}\n\n"
-                        "Append-only log (newest last):\n"
-                        + ("\n".join(self.reflect_log) or "none")
-                        + f"\n\nCurrent state:\n{self.right_now()}\n\nDecide."
-                    ),
+                    "content": f"{state}\n\nCurrent state:\n{self.right_now()}\n\nDecide.",
                 },
             ],
             "temperature": 0.3,
             "stream": False,
             "max_tokens": REFLECT_MAX_TOKENS,
-            "thinking_budget_tokens": REFLECT_THINK_TOKENS,
             "id_slot": 1,
-            "chat_template_kwargs": {"enable_thinking": True},
+            "chat_template_kwargs": {"enable_thinking": self.reflect_thinks},
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "reflection",
                     "schema": {
                         "type": "object",
-                        "properties": {
-                            "orders": {"type": "array", "items": {"type": "string"}},
-                            "remember": {"type": "array", "items": {"type": "string"}},
-                        },
-                        "required": ["orders", "remember"],
+                        "properties": properties,
+                        "required": list(properties),
                     },
                 },
             },
         }
+        if self.reflect_thinks:
+            request["thinking_budget_tokens"] = REFLECT_THINK_TOKENS
         output = ""
         error = None
         interrupted = False
@@ -453,6 +484,8 @@ class Brain:
                 self.memory.orders = orders
                 self.trace.add("orders", {"orders": orders, "reason": reason})
             self.memory.remember = remember
+            if self.cfg.p2p:
+                self.set_instruction(str(result.get("instruction", "")).strip())
         except asyncio.CancelledError:
             interrupted = True
             raise
@@ -477,6 +510,19 @@ class Brain:
                 asyncio.get_running_loop().call_soon(
                     self._request_reflect, "triggered while reflection was running"
                 )
+
+    def set_instruction(self, text: str, force: bool = False) -> None:
+        """Hands Open-P2P its instruction: tools/p2p/server.py watches the file. Empty is none."""
+        if text == self.instruction and not force:
+            return
+        self.instruction = text
+        path = self.cfg.p2p.instruction
+        path.parent.mkdir(parents=True, exist_ok=True)
+        part = path.with_name(path.name + ".part")
+        part.write_text(text + "\n")
+        part.replace(path)
+        self.trace.add("instruction", {"text": text})
+        print(f'[p2p] instruction: "{text}"', flush=True)
 
     async def kev(
         self,
@@ -806,7 +852,7 @@ class Brain:
             "id_slot": 0,
             "chat_template_kwargs": {"enable_thinking": False},
         }
-        resume_reflect = await self._interrupt_reflect()
+        resume_reflect = self.reflect_thinks and await self._interrupt_reflect()
         generation = self.speaking.generation
         started = time.monotonic()
         span.mark("llm_request")
@@ -956,6 +1002,8 @@ class Brain:
         self.summarizing = False
         self.reflect_log = []
         self.validator.current = None
+        if self.cfg.p2p:
+            self.set_instruction("")
         if self.speaking.is_speaking():
             self.speaking.interrupt()
             await self.link.send_json({"type": "stop_audio"})
@@ -971,6 +1019,8 @@ class Brain:
         self.summarizing = False
         self.reflect_log = []
         self.validator.current = None
+        if self.cfg.p2p:
+            self.set_instruction("")
         self.speaking.interrupt()
         await self.link.send_json({"type": "stop_audio"})
         self.trace.add("event", {"text": f"(new game: {level}, memory reset)"})

@@ -8,6 +8,7 @@ import pytest
 
 import m8py.brain as brainmod
 from m8py.brain import Brain, Event, Heard, Memory, Summary, joint_options
+from m8py.config import P2PConfig
 from m8py.speak import EndJob, SentenceJob
 from m8py.speaking import Speaking
 from m8py.trace import Trace
@@ -439,5 +440,72 @@ async def test_look_cancels_and_resumes_reflect(cfg, tmp_path):
     assert what == "A rock."
     assert [entry["interrupted"] for entry in entries] == [True, False]
     assert entries[-1]["reason"] == "resume after look"
+    await client.aclose()
+    await trace.close()
+
+
+def coop(cfg, tmp_path):
+    cfg.kev = None
+    cfg.p2p = P2PConfig(tmp_path / "run" / "p2p-instruction.txt")
+    return cfg
+
+
+@pytest.mark.asyncio
+async def test_coop_answers_player_while_reflect_writes_instruction(cfg, tmp_path):
+    reflects = []
+
+    async def handler(request):
+        body = json.loads(request.content)
+        if body.get("id_slot") == 1:
+            reflects.append(body)
+            await asyncio.sleep(0.05)  # still running when Voice starts
+            content = json.dumps(
+                {"orders": ["Follow John"], "remember": [], "instruction": "follow the player"}
+            )
+            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+        stream = 'data: {"choices":[{"delta":{"content":"Right behind you."}}]}\n\ndata: [DONE]\n\n'
+        return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+
+    b, link, trace, client = make(coop(cfg, tmp_path), tmp_path, handler)
+    path = cfg.p2p.instruction
+    assert path.read_text() == "\n"
+    assert b.doing_text() == "Kevin's current action: playing on his own"
+
+    await b.on_heard(Heard("Kevin, follow me.", turn_id="1-mic"))
+    await b.reflect_task
+    assert b.memory.feed[-1] == "Kevin: Right behind you."
+    assert path.read_text() == "follow the player\n"
+    assert b.doing_text() == "Kevin's current action: follow the player"
+    request = reflects[0]
+    assert request["chat_template_kwargs"]["enable_thinking"] is False
+    assert "thinking_budget_tokens" not in request
+    assert "instruction" in request["response_format"]["json_schema"]["schema"]["required"]
+    entries = [e["data"] for e in trace.entries if e["kind"] == "reflect"]
+    assert [e["interrupted"] for e in entries] == [False]
+
+    await b.on_new_game("a30")
+    assert path.read_text() == "\n"
+    await client.aclose()
+    await trace.close()
+
+
+@pytest.mark.asyncio
+async def test_coop_speaks_to_player_and_silence_only(cfg, tmp_path):
+    b, _, trace, client = make(coop(cfg, tmp_path), tmp_path)
+    said = []
+
+    async def say(span):
+        said.append(span.data["trigger"])
+        return False
+
+    b.say = say
+    b.speaking.until = time.monotonic() - 60
+    await b.on_events([brainmod.Event("Kevin killed an Elite.")])
+    await b.on_heard(Heard("Uh, so.", turn_id="1-mic"))
+    assert said == [] and b.reflect_task is None
+    await b.on_events([brainmod.Event(brainmod.QUIET_EVENT)], quiet=True)
+    await b.on_heard(Heard("What's your favorite color?", turn_id="2-mic"))
+    assert said == ["quiet", "heard"]
+    b.reflect_task.cancel()
     await client.aclose()
     await trace.close()

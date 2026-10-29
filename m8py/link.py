@@ -173,7 +173,7 @@ class GameLink:
                 self.state = None
                 msg["_received_at"] = received_at
                 await self.events.put(msg)
-            case "event" | "saved" | "loaded" | "direct":
+            case "event" | "saved" | "loaded" | "direct" | "invite":
                 msg["_received_at"] = received_at
                 await self.events.put(msg)
 

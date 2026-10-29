@@ -48,7 +48,7 @@ async def wait_health(name: str, url: str, client: httpx.AsyncClient) -> None:
 async def run(cfg: Config) -> Path:
     client = httpx.AsyncClient(timeout=60)
     await asyncio.gather(
-        wait_health("Kev", health_url(cfg.kev.url), client),
+        *([wait_health("Kev", health_url(cfg.kev.url), client)] if cfg.kev else []),
         wait_health("LLM", health_url(cfg.llm.url), client),
         wait_health("voice", cfg.mate.voice_server.rstrip("/") + "/health", client),
         wait_health("STT", health_url(cfg.stt.url), client),
@@ -87,10 +87,29 @@ async def run(cfg: Config) -> Path:
         asyncio.create_task(gpu_sampler(trace, cfg.log.gpu_interval)),
     ]
 
+    joined = None
+
+    async def join(link: str) -> None:
+        """Starts Kevin's own game on the host's invite, with Open-P2P playing it."""
+        nonlocal joined
+        if not cfg.p2p or not cfg.p2p.launch or not link or link == joined:
+            return
+        joined = link
+        print(f"[p2p] joining the host's invite as {cfg.mate.name}", flush=True)
+        trace.add("invite", {"link": link})
+        process = await asyncio.create_subprocess_exec(
+            str(cfg.p2p.launch), link, stdin=asyncio.subprocess.DEVNULL
+        )
+        if await process.wait():
+            print(f"[p2p] {cfg.p2p.launch} failed ({process.returncode})", flush=True)
+
     async def forward_events():
         while True:
             msg = await events.get()
             kind = msg.get("type")
+            if kind == "invite":
+                await join(str(msg.get("link", "")))
+                continue
             if kind == "saved":
                 item = Saved(str(msg.get("id", "")))
             elif kind == "loaded":

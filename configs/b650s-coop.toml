@@ -1,0 +1,47 @@
+[mate]
+name = "Kevin"
+persona = "../personas/kevin"
+voice_server = "http://127.0.0.1:7860"
+voice_reference = "../voices/kevin.wav"
+voice_seed = 42
+
+[mic]
+source = "remote"
+barge_in = true
+mute_while_speaking = true
+save_recordings = false
+vad_threshold = 0.5
+end_of_speech_silence = 0.1
+
+[remote_mic]
+bind = "100.126.232.8"
+port = 8091
+
+[stt]
+url = "http://127.0.0.1:8083/v1/audio/transcriptions"
+
+# Co-op mode: no Kev. Kevin is player 2 in the host's game, played by Open-P2P from the
+# instruction Reflect writes; the host's invite starts him (infra/b650s/kevin-coop.sh).
+[p2p]
+instruction = "../../run/p2p-instruction.txt"
+launch = "../../scripts/kevin-coop.sh"
+
+[llm]
+url = "http://127.0.0.1:8081/v1/chat/completions"
+temperature = 1.0
+
+[models]
+silero_vad = "../../models/silero_vad.onnx"
+
+[game]
+bind = "127.0.0.1"
+port = 47800
+
+[site]
+bind = "100.126.232.8"
+port = 8090
+
+[log]
+directory = "../logs"
+save_audio = true
+gpu_interval = 2.0

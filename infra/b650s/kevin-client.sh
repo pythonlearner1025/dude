@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Start Kevin's own Halo as co-op player 2 joining an invite, with no m8 link (the host's game keeps it).
+# Mouse sensitivity 0.61091 matches Open-P2P's training (docs/reports/p2p-halo-zero-shot.md).
 # Set HALO_NET_ADDRESS only when a second copy runs on this machine (e.g. 127.0.0.6 beside a local host).
 set -euo pipefail
 
@@ -9,14 +10,12 @@ if [[ -z "$invite" ]]; then
 	exit 2
 fi
 
+source /home/minjune/m8work/scripts/_pid.sh
 log_file=/home/minjune/m8work/logs/kevin-client.log
 pid_file=/home/minjune/m8work/run/kevin-client.pid
-if [[ -f "$pid_file" ]]; then
-	old_pid=$(<"$pid_file")
-	if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" 2>/dev/null; then
-		echo "Kevin client is already running as PID $old_pid" >&2
-		exit 1
-	fi
+if pidfile_live "$pid_file"; then
+	echo "Kevin client is already running as PID $(pidfile_pid "$pid_file")" >&2
+	exit 1
 fi
 
 mkdir -p /home/minjune/m8work/logs /home/minjune/m8work/run
@@ -29,6 +28,8 @@ setsid env \
 	SDL_AUDIODRIVER=pulseaudio \
 	HALO_DISPLAY_MODE=windowed \
 	HALO_WINDOW_SIZE=1280x720 \
+	HALO_NO_AUDIO=1 \
+	HALO_MOUSE_SENSITIVITY="${HALO_MOUSE_SENSITIVITY:-0.61091}" \
 	${HALO_NET_ADDRESS:+"HALO_NET_ADDRESS=$HALO_NET_ADDRESS"} \
 	HALO_COOP_JOIN="$invite" \
 	HALO_M8_COMPANION_ACTOR=false \
@@ -36,6 +37,6 @@ setsid env \
 	HALO_NET_EXTRA_ADDRESSES="${HALO_NET_EXTRA_ADDRESSES:-100.126.232.8}" \
 	./halo >>"$log_file" 2>&1 </dev/null &
 client_pid=$!
-printf '%s\n' "$client_pid" >"$pid_file"
+write_pidfile "$client_pid" "$pid_file"
 disown "$client_pid" 2>/dev/null || true
 echo "Started Kevin client as PID $client_pid; log: $log_file"

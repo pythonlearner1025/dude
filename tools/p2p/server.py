@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Launch Open-P2P and relay a changing instruction file to its stdin."""
+"""Launch Open-P2P and relay a changing instruction file to its stdin.
+
+An empty file is no instruction: sent as NONE, which our inference.py patch (open-p2p.patch) maps
+back to the empty text the server starts with, since upstream ignores empty lines."""
 
 import argparse
 import os
@@ -8,12 +11,14 @@ import subprocess
 import time
 from pathlib import Path
 
+NONE = "<none>"
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("600M", "1200M"), default="1200M")
+    parser.add_argument("--model", choices=("600M", "1200M"), default="600M")
     parser.add_argument("--instruction", default="/home/minjune/m8work/run/p2p-instruction.txt")
-    parser.add_argument("--log", default="/home/minjune/m8work/p2p-test/server.log")
+    parser.add_argument("--log", default="/home/minjune/m8work/logs/p2p-server.log")
     parser.add_argument("--fps-test-frames", type=int, default=20)
     parser.add_argument("--no-compile", action="store_true")
     args = parser.parse_args()
@@ -45,9 +50,8 @@ def main():
             while not stopping and process.poll() is None:
                 value = instruction.read_text(errors="replace").strip()
                 if value != last:
-                    # Empty is the server's initial instruction. Upstream ignores later empty lines.
-                    if value:
-                        process.stdin.write(value.replace("\n", " ") + "\n")
+                    if value or last:  # empty is the server's initial instruction
+                        process.stdin.write((value or NONE).replace("\n", " ") + "\n")
                         process.stdin.flush()
                     last = value
                     log.write(f"instruction-file update: {value!r}\n")
