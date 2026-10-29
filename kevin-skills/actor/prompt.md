@@ -20,4 +20,6 @@ Examples (the player's words -> the answer):
   "follow me" -> follow
   "stay here" -> stay
   "push them off the ridge" / "push them back" -> push
+  "switch to your other weapon" / "swap guns" -> switch_weapon
+  "get your pistol out" -> switch_weapon pistol
   "make them run" (no skill for it) -> nofit make them run | attack grunt#2

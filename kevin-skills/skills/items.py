@@ -31,3 +31,33 @@ def pick_up_weapon(k, kind=""):
             return Done(f"picked up the {label.split(' (')[0]}")
         yield
     return Failed("couldn't reach it")
+
+
+def weapons(k):
+    """(held, on his back) from the game's summary: "holding a pistol (...), an assault rifle on his back"."""
+    text = k.state.get("state") or ""
+    held = re.search(r"holding an? ([a-z ]+?)(?: \(|,|\.|$)", text)
+    back = re.search(r"an? ([a-z ]+?) on his back", text)
+    return (held[1] if held else ""), (back[1] if back else "")
+
+
+@skill(
+    when='swap to the weapon on his back: "switch weapons", "use your other gun", "pull out your pistol"',
+    args={"kind": "the weapon wanted, or empty for the other one"},
+    tags=("calm", "combat"),
+)
+def switch_weapon(k, kind=""):
+    held, back = weapons(k)
+    if kind and held and kind.lower() in held:
+        return Done(f"already holding the {held}")
+    if not back or not k.offered("switch_weapon"):
+        return Failed("no other weapon")
+    if kind and kind.lower() not in back:
+        return Failed(f"no {kind}; my other weapon is the {back}")
+    started = k.time
+    while k.time - started < 5:
+        if weapons(k) == (back, held):
+            return Done(f"holding the {back}")
+        k.switch_weapon()
+        yield
+    return Failed("couldn't switch")
