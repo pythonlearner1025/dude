@@ -18,7 +18,7 @@ from .config import Config
 from .skills import Done, Failed, Library, Runner, Running
 from .trace import Trace
 
-HEARTBEAT = 3.0  # seconds between decisions in combat or while a skill runs, with nothing new
+HEARTBEAT = 3.0  # seconds between decisions while enemies are around, with nothing new
 REVIEW = 600.0  # seconds of play between review tickets
 RULES = (
     "You choose what Kevin, the player's Marine teammate in Halo, does next. Answer with ONE "
@@ -27,8 +27,13 @@ RULES = (
     "  keep                            the running skill still fits\n"
     "  nofit <order> | <skill> <args>  no skill does what the player asked; do the nearest one "
     "meanwhile\n"
-    "Enemies are named kind#id (grunt#31). Orders stay in force until the player changes them. "
-    "Protect the player; never shoot them."
+    "Enemies are named kind#id (grunt#31). Protect the player; never shoot them.\n"
+    "- Standing orders (hold fire, stay close, stay behind me) hold until the player changes "
+    "them. A one-off order (flank him, go there, take that out) is over when its skill ends.\n"
+    "- nofit is only for something the player just asked, in their own words, that no skill "
+    "here can do. Never for a skill that failed, for an order that can't be done right now "
+    "(no such enemy: follow or keep), or for anything the player didn't say.\n"
+    "- Don't start again a skill that just failed for the same reason; pick another or follow."
 )
 
 
@@ -150,8 +155,7 @@ class Play:
             try:
                 await asyncio.wait_for(self.wake.wait(), HEARTBEAT)
             except asyncio.TimeoutError:
-                busy = self.body.enemies or self.runner.current
-                if not busy or not self.body.state:
+                if not self.body.enemies or not self.body.state:
                     continue
                 self.reasons.append("heartbeat")
             self.wake.clear()
@@ -178,14 +182,15 @@ class Play:
         system, user = self.system(), self.digest(reasons)
         answer, ms, usage = await self.actor.ask(system, user)
         decision = parse(answer, self.library)
-        error = self.apply(decision)
+        asked = any(reason.startswith("the player said") for reason in reasons)
+        error = self.apply(decision, asked)
         retry = None
         if error:  # one more try, told why
             again = f'{user}\n\nYour answer "{answer}" could not run: {error}. Answer again.'
             retry, more, _ = await self.actor.ask(system, again)
             ms += more
             decision = parse(retry, self.library)
-            error = self.apply(decision)
+            error = self.apply(decision, asked)
         self.decisions += 1
         self.last_decision = time.monotonic()
         self.trace.add(
@@ -206,12 +211,15 @@ class Play:
         print(f"[actor] {retry or answer} ({ms} ms) <- {' / '.join(reasons)[:120]}", flush=True)
         return decision
 
-    def apply(self, decision: Decision) -> str | None:
+    def apply(self, decision: Decision, asked: bool = True) -> str | None:
+        """Starts the decided skill. A nofit becomes a ticket only when the player just spoke:
+        the actor also says nofit about failed skills and orders it made up."""
         if decision.kind == "keep":
             return None
         if decision.kind == "invalid":
             return decision.error
-        if decision.kind == "nofit" and decision.order and decision.order not in self.ticketed:
+        fresh = decision.order and decision.order not in self.ticketed
+        if decision.kind == "nofit" and asked and fresh:
             self.ticketed.add(decision.order)
             self.ticket(
                 "new_order", order=decision.order, meanwhile=decision.skill, args=decision.args

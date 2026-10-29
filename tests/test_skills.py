@@ -188,6 +188,8 @@ async def test_play_decides_retries_and_writes_tickets(cfg, library, tmp_path):
     assert "Orders: hold fire." in body["messages"][1]["content"]
     assert "could not run" in requests[1]["messages"][1]["content"]
     await play.decide(['the player said "push them off the ridge"'])
+    answers = iter(["nofit go to the pod | attack grunt#31"])
+    await play.decide(["attack grunt#31 failed: path blocked"])  # not the player's: no ticket
     tickets = list((tmp_path / "tickets").glob("*.json"))
     assert [json.loads(t.read_text())["order"] for t in tickets] == ["push them off"]
     await asyncio.sleep(0)
