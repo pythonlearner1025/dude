@@ -21,14 +21,17 @@ CHAT_EXTRA="-np 2 -kvu" ./start-chat-qwen.sh          # Qwen3.5-9B + mmproj on :
 (Gemma, Breeze, STT, ~18 GB), `M8PY_CONFIG=configs/b650s-skills.toml ./restart-m8py.sh`, and
 `./start-coach.sh`. The actor is DeepSeek V4.1 Flash on OpenRouter; its key is
 `~/m8work/notes/openrouter.env` (mode 600), which `start-m8py.sh` loads. Skills live in the git repo
-`~/m8work/kevin-skills` (seeded from `dude/kevin-skills`); tickets for the coach in
-`~/m8work/run/tickets`, with `<ticket>.log` and `<ticket>.result.md` beside each. The coach runs
-`claude -p` with Opus there: the current Claude Code in `~/.npm-global/bin` (the one in
+`~/m8work/kevin-skills` (seeded from `dude/kevin-skills`). The coach watches the newest session
+in `dude/logs` and, at most once a minute when something happened in a game, writes a packet to
+`~/m8work/run/observations/<session>/<n>/` (`packet.md`, `packet.json`, `frames/`) and runs
+`claude -p` on it in the library (Opus 5.5, medium effort; `COACH_MODEL`, `COACH_EFFORT`), which
+leaves `claude.log` (stream-json: `python3 ~/m8work/dude/tools/coach_log.py <dir>/claude.log`)
+and `result.md` there. It uses the current Claude Code in `~/.npm-global/bin` (the one in
 `/usr/local` is 2.0.1), signed in with a one-year token from `claude setup-token` kept in
-`~/m8work/notes/claude-coach.env` (mode 600), which `start-coach.sh` loads. It runs apart from
+`~/m8work/notes/claude-coach.env` (mode 600), which `start-coach.sh` loads, and runs apart from
 this machine's personal Claude Code setup (project settings only, the personal CLAUDE.md excluded,
-no skills or MCP, six tools): see `ISOLATED` in `m8py/coach.py`. Each `<ticket>.log` is
-stream-json; `python3 ~/m8work/dude/tools/coach_log.py <ticket>.log` shows the steps.
+no skills or MCP, six tools): see `ISOLATED` in `m8py/coach.py`. `tools/coach_bench.py` re-runs a
+packet with another model or effort on a clone of the library.
 `HALO_START_LEVEL=a30 ./halo` plays a campaign level at once, for tests without the menus.
 
 **Co-op mode** (Kevin is player 2, played by Open-P2P; no Kev): `./start-stack-coop.sh` (Gemma,

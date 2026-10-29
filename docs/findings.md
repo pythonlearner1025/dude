@@ -452,6 +452,29 @@ commits. The game gained `go_point` (to the metre), health numbers and `HALO_STA
   down"), `take_cover` waits for the shields to recharge, and the actor takes cover on "shields
   down" and keeps while Kevin is dead; a test for each. Its commit went to the wrong repo (its
   shell had `cd`'d into `dude/logs`), so git now reaches the library through `GIT_DIR` and
-  `GIT_WORK_TREE`. Open: Reflect's orders still pick up junk ("Stop.", Kevin's
+  `GIT_WORK_TREE`.
+- *First playtest (a30, ~13 min, 230 decisions, median 195 ms):* "sparks of working" but orders
+  not followed. The biggest failure was silent: "keep moving ahead of me" got `lead` nine times,
+  and `lead` held a point 6 m along the player's facing, so Kevin stopped when they stopped and
+  stood in their crosshair (about 20 "Chief shot Kevin", two deaths). Nothing failed, so no ticket
+  was written; the 10-minute review that would have seen it came after the player quit (Opus
+  then fixed `lead` from it). Meanwhile 7 near-duplicate waterfall tickets held the coach for ~8
+  min, and speech recognition turned "peek out" into "speak out", "keep doubt", "seek out".
+- *Coach loop, rebuilt (design: `docs/design/kevin-coach-loop.html`):* m8py sends the coach
+  nothing (no tickets, no `nofit`). It traces state once a second and a 640-px JPEG of the
+  player's view every 10 s and on each player line (24 KB). The coach looks at most once a
+  minute when something happened in a game: `m8py/observe.py` turns everything since the last
+  look into one packet (player and Kevin lines, events, decisions, skill endings, Halo
+  commands, state when it changes, up to 12 frames); a slow look just makes the next packet
+  longer. Opus keeps `notes.md` as memory and writes commit subjects for the player: m8py loads a
+  commit at once (restarting the running skill if its code changed) and Kevin may say it. On a
+  272-s scripted a30 packet (125 lines, 14 KB), Opus at medium effort read it and two frames
+  and fixed `take_cover` ending at once and "keep moving ahead" answered `keep`, in 97 s, $0.64.
+- *Coach speed (3 real tickets, re-run from the commit before each fix):* Opus 5.5 high 399 s
+  ($2.09), Opus medium 231 s ($1.27), Sonnet 5.5 high 271 s ($0.75), Sonnet medium 154 s
+  ($0.41). Both Sonnet runs fixed "stop crouching" with a separate `stand_up` skill instead of
+  the cause; the Opus runs made every movement skill stand Kevin up. Time is turns (12 to 40
+  tool round trips), not tokens per second. The coach runs Opus at medium.
+- Open: Reflect's orders still pick up junk ("Stop.", Kevin's
   own lines). Halo's AI does the fine control, so tactics are only as precise as two decisions a
   second and the companion's order set allow; the player-2 body is the next step for that.

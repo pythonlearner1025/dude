@@ -9,16 +9,18 @@ flowchart LR
     you(["you speak"]) --> stt["STT<br/>Parakeet"] --> voice["Voice<br/>Gemma-12B"] -- speech --> game(["Halo"])
     stt --> actor["Actor<br/>DeepSeek V4.1 Flash, ~0.2 s"] -- "a skill" --> skills["Skills<br/>Python, each game state"] -- actions --> game
     game -- state --> skills
-    actor -- "tickets" --> coach["Coach<br/>Opus in Claude Code"] -- "new, fixed skills" --> skills
+    skills -- "trace: everything, + frames" -.-> coach["Coach<br/>Opus in Claude Code,<br/>looks every minute"] -- "new, fixed skills" --> skills
 ```
 
 - **Voice** answers what you say (not filler like "uh"); first words ~1.9 s after you stop.
 - **The actor** picks Kevin's next skill ("flank grunt#31 right") whenever something happens.
 - **Skills** are short Python generators in `kevin-skills/` that drive Halo's own AI.
-- **The coach** writes a skill when you ask for something none covers, and fixes failing ones.
+- **The coach** watches: about once a minute it reads everything since its last look (your
+  words, Kevin's, his decisions, skills, state and your view) and fixes what went wrong. Nothing
+  sends it requests.
 
 Design and numbers: [the skill loop](docs/design/kevin-skill-loop.html),
-[findings §12](docs/findings.md).
+[the coach loop](docs/design/kevin-coach-loop.html), [findings §12](docs/findings.md).
 
 ## Run
 
