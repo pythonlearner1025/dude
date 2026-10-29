@@ -687,7 +687,7 @@ index aaa0b1fe..59a2a390 100644
  /* Kevin's eyes (d3d8_gl.c): whether mate asked for the player's view (once),
  and the frame taken as it was shown, as RGB rows from the top, which goes to
 diff --git a/port/linux/game/network_test.c b/port/linux/game/network_test.c
-index 149023f0..6b3986bb 100644
+index 149023f0..6faa66df 100644
 --- a/port/linux/game/network_test.c
 +++ b/port/linux/game/network_test.c
 @@ -43,6 +43,7 @@ Called from the main loop every frame (main.c).
@@ -706,17 +706,26 @@ index 149023f0..6b3986bb 100644
  #include "tag_files/tag_files.h"
  #include "camera/observer.h"
  
-@@ -122,6 +124,9 @@ static struct
+@@ -73,6 +75,7 @@ int config_boolean(char const *name);
+ double config_real(char const *name);
+ long config_integer(char const *name);
+ void platform_log(char const *format, ...);
++void platform_request_quit(void);
+ /* damage.c's */
+ void damage_kill_object_for_player(long object_index, long player_index);
+ /* network_distributed.c's */
+@@ -122,6 +125,10 @@ static struct
  	boolean browsing;
  	boolean browse_listed;
  	float browse_seconds;
 +	boolean automatic_coop;
 +	real coop_wait;
 +	char coop_invite[256];
++	boolean coop_played;
  } network_test;
  
  /* the variant at the index of the list (copied to name), FALSE past its end */
-@@ -153,9 +158,34 @@ static void network_test_read_settings(
+@@ -153,9 +160,34 @@ static void network_test_read_settings(
  	void)
  {
  	char const *setting = config_string("debug.network_test");
@@ -752,7 +761,7 @@ index 149023f0..6b3986bb 100644
  	{
  		char *colon;
  
-@@ -186,10 +216,53 @@ static void network_test_read_settings(
+@@ -186,10 +218,53 @@ static void network_test_read_settings(
  	snprintf(network_test.pickup_weapon, sizeof(network_test.pickup_weapon), "%s",
  		config_string("debug.network_test_pickup_weapon"));
  	network_test.score_to_win = (long)config_integer("debug.network_test_score");
@@ -807,7 +816,28 @@ index 149023f0..6b3986bb 100644
  /* appends to a line, cut short when it is full */
  static void network_test_append(
  	char *line,
-@@ -985,6 +1058,11 @@ void network_test_update(
+@@ -900,6 +975,20 @@ void network_test_update(
+ 	{
+ 		network_test.game_over = TRUE;
+ 	}
++	/* (Kevin's automatic co-op client: back at the main menu after the host's
++	game means it is over (the host left or ended it, or the connection was
++	lost), and Kevin leaves with it, as nothing else would stop his player) */
++	if (network_test.mode == _network_test_join && network_test.automatic_coop)
++	{
++		if (game_in_progress() && !main_menu_loaded)
++			network_test.coop_played = TRUE;
++		else if (network_test.coop_played && main_menu_loaded)
++		{
++			network_test.coop_played = FALSE;
++			platform_log("co-op startup: the host's game is over; Kevin leaves");
++			platform_request_quit();
++		}
++	}
+ 	if (network_test.mode == _network_test_join && network_test.game_over && main_menu_loaded)
+ 	{
+ 		network_test.game_over = FALSE;
+@@ -985,6 +1074,11 @@ void network_test_update(
  		{
  			network_test.set_up = TRUE;
  			main_set_multiplayer_map_name(network_test.map_name);
@@ -819,7 +849,7 @@ index 149023f0..6b3986bb 100644
  			player_ui_fast_setup_network_server();
  			platform_log("network test: hosting %s", network_test.map_name);
  			/* (in the server browser, as Create Game > Internet's PUBLIC) */
-@@ -1033,11 +1111,14 @@ void network_test_update(
+@@ -1033,11 +1127,14 @@ void network_test_update(
  			}
  			if (!network_test.player_added && network_test.setup_seconds >= 2.0f && global_network_game_client_get())
  				network_test.player_added = network_game_client_add_player(global_network_game_client_get(), 0);
@@ -836,7 +866,7 @@ index 149023f0..6b3986bb 100644
  			}
  		}
  		break;
-@@ -1045,6 +1126,12 @@ void network_test_update(
+@@ -1045,6 +1142,12 @@ void network_test_update(
  		if (!network_test.set_up)
  		{
  			network_test.set_up = TRUE;

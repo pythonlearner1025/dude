@@ -17,7 +17,7 @@ os.environ.setdefault("DISPLAY", ":1")
 import mss
 from evdev import UInput, ecodes as e
 from PIL import Image
-from Xlib import X, display
+from Xlib import X, display, error
 
 OPEN_P2P = Path(os.environ.get("OPEN_P2P_ROOT", "/home/minjune/m8work/open-p2p"))
 sys.path.insert(0, str(OPEN_P2P))
@@ -230,7 +230,12 @@ async def run(args):
         with mss.mss(display=args.display, with_cursor=True) as grabber:
             while not stop.is_set():
                 started_ns = time.monotonic_ns()
-                box = client_box(dpy, window)
+                try:
+                    box = client_box(dpy, window)
+                except error.XError:  # Kevin's game quit (kevin-client.sh: the host's game ended)
+                    print("Kevin's window is gone; stopping", flush=True)
+                    stop.set()
+                    return
                 shot = grabber.grab(box)
                 rgb = Image.frombytes("RGB", shot.size, shot.rgb)
                 rgb = rgb.resize((192, 192), Image.Resampling.HAMMING)
