@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,7 @@ FEED_TOKENS, FEED_FOLDED_TO, FEED_MAX_TOKENS = 16_000, 12_000, 20_000
 QUIET, QUIET_EVENT, KEV_FEED_LINES, SAVES = 45.0, "It's been quiet for a while.", 20, 50
 REFLECT_INTERVAL, REFLECT_LOG_TOKENS, REFLECT_MAX_TOKENS = 15.0, 7_000, 768
 REFLECT_THINK_TOKENS = 256  # unbudgeted thinking ran 1-2k tokens (12-27 s) and often never answered
+EARLY_INSTRUCTION = re.compile(r'\s*\{\s*"instruction"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
 
 @dataclass(slots=True)
@@ -416,10 +418,8 @@ class Brain:
             "never positions, health, ammo, targets or anything about the current moment, and "
             "never what Kevin did. "
         )
-        properties: dict[str, Any] = {
-            "orders": {"type": "array", "items": {"type": "string"}},
-            "remember": {"type": "array", "items": {"type": "string"}},
-        }
+        lists = {"type": "array", "items": {"type": "string"}}
+        properties: dict[str, Any] = {"orders": lists, "remember": lists}
         # The log comes before what changes between runs, so the server can reuse its prefix.
         state = (
             f"Summary:\n{self.memory.summary or 'none'}\n\nAppend-only log (newest last):\n"
@@ -432,10 +432,11 @@ class Brain:
                 "the player's newest request: one short plain command such as \"follow the "
                 "player\", \"move forward\", \"shoot the enemies\" or \"take cover behind the "
                 "rocks\". Keep it unchanged while it still applies; leave it empty when there "
-                "is nothing to do but play along. Output JSON only with exactly: orders and "
-                "remember, each the full replacement list of short strings, and instruction."
+                "is nothing to do but play along. Output JSON only with exactly: instruction, "
+                "then orders and remember, each the full replacement list of short strings."
             )
-            properties["instruction"] = {"type": "string", "maxLength": 120}
+            # First, so Open-P2P gets it while the lists are still being written.
+            properties = {"instruction": {"type": "string", "maxLength": 120}, **properties}
             state += f"\n\nInstruction now: {self.instruction or 'none'}"
         else:
             system += (
@@ -451,7 +452,7 @@ class Brain:
                 },
             ],
             "temperature": 0.3,
-            "stream": False,
+            "stream": True,
             "max_tokens": REFLECT_MAX_TOKENS,
             "id_slot": 1,
             "chat_template_kwargs": {"enable_thinking": self.reflect_thinks},
@@ -473,10 +474,15 @@ class Brain:
         error = None
         interrupted = False
         try:
-            response = await self.client.post(self.cfg.llm.url, json=request)
-            response.raise_for_status()
-            body = response.json()
-            output = str(body.get("choices", [{}])[0].get("message", {}).get("content", ""))
+            async with self.client.stream("POST", self.cfg.llm.url, json=request) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: ") or line[6:].strip() == "[DONE]":
+                        continue
+                    choices = json.loads(line[6:]).get("choices") or []
+                    output += (choices[0].get("delta", {}).get("content") or "") if choices else ""
+                    if self.cfg.p2p and (early := EARLY_INSTRUCTION.match(output)):
+                        self.set_instruction(json.loads(f'"{early[1]}"').strip())
             result = json.loads(output)
             orders = [str(x).strip() for x in result.get("orders", []) if str(x).strip()]
             remember = [str(x).strip() for x in result.get("remember", []) if str(x).strip()]

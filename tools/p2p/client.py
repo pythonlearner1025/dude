@@ -75,12 +75,15 @@ def find_window(dpy, pid, title):
 
 
 def ancestors(window):
+    """The window and its frames, without the root: every window shares that."""
     ids = set()
     while window:
-        ids.add(window.id)
         try:
             parent = window.query_tree().parent
-            window = None if parent.id == window.id else parent
+            if parent.id == window.id:  # the root is its own parent
+                break
+            ids.add(window.id)
+            window = parent
         except Exception:
             break
     return ids
@@ -94,6 +97,11 @@ def focused(dpy, target):
         return bool(ancestors(active) & ancestors(target))
     except Exception:
         return False
+
+
+def activate(window):
+    subprocess.Popen(["xdotool", "windowactivate", str(window.id)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def client_box(dpy, window):
@@ -238,6 +246,8 @@ async def run(args):
     if not window:
         raise RuntimeError("Kevin window not found")
 
+    if args.keep_focus:
+        activate(window)
     box = client_box(dpy, window)
     confinement = Confinement(args.display)
     centre(dpy, box)
@@ -314,8 +324,7 @@ async def run(args):
                 injector.release()
                 # Openbox sometimes moves focus away; nothing else on this display needs it.
                 if args.keep_focus and time.monotonic() > next_focus:
-                    subprocess.Popen(["xdotool", "windowactivate", str(window.id)],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    activate(window)
                     next_focus = time.monotonic() + 0.5
             if not over(dpy, window, box):
                 centre(dpy, box)

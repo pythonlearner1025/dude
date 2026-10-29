@@ -36,6 +36,20 @@ class Link:
         return None
 
 
+def sse(*pieces):
+    """A streamed chat completion of these content pieces; a piece may be an Event to wait on."""
+
+    async def body():
+        for piece in pieces:
+            if isinstance(piece, asyncio.Event):
+                await piece.wait()
+                continue
+            yield f"data: {json.dumps({'choices': [{'delta': {'content': piece}}]})}\n\n".encode()
+        yield b"data: [DONE]\n\n"
+
+    return httpx.Response(200, content=body(), headers={"content-type": "text/event-stream"})
+
+
 def make(cfg, tmp_path, handler=None):
     link = Link()
     trace = Trace(tmp_path / "logs")
@@ -279,7 +293,7 @@ async def test_voice_cancels_and_resumes_reflect(cfg, tmp_path):
                 reflect_started.set()
                 await asyncio.Event().wait()
             content = json.dumps({"orders": ["Stay close"], "remember": ["John trusts Kevin"]})
-            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+            return sse(content)
         stream = (
             'data: {"choices":[{"delta":{"content":"Copy."}}]}\n\n'
             "data: [DONE]\n\n"
@@ -422,7 +436,7 @@ async def test_look_cancels_and_resumes_reflect(cfg, tmp_path):
                 reflect_started.set()
                 await asyncio.Event().wait()
             content = json.dumps({"orders": [], "remember": []})
-            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+            return sse(content)
         return httpx.Response(200, json={"choices": [{"message": {"content": "A rock."}}]})
 
     b, link, trace, client = make(cfg, tmp_path, handler)
@@ -453,18 +467,15 @@ def coop(cfg, tmp_path):
 @pytest.mark.asyncio
 async def test_coop_answers_player_while_reflect_writes_instruction(cfg, tmp_path):
     reflects = []
+    lists = asyncio.Event()
 
     async def handler(request):
         body = json.loads(request.content)
         if body.get("id_slot") == 1:
             reflects.append(body)
-            await asyncio.sleep(0.05)  # still running when Voice starts
-            content = json.dumps(
-                {"orders": ["Follow John"], "remember": [], "instruction": "follow the player"}
-            )
-            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
-        stream = 'data: {"choices":[{"delta":{"content":"Right behind you."}}]}\n\ndata: [DONE]\n\n'
-        return httpx.Response(200, text=stream, headers={"content-type": "text/event-stream"})
+            rest = '"orders": ["Follow John"], "remember": []}'
+            return sse('{"instruction": "follow', ' the player", ', lists, rest)
+        return sse("Right behind you.")
 
     b, link, trace, client = make(coop(cfg, tmp_path), tmp_path, handler)
     path = cfg.p2p.instruction
@@ -472,16 +483,24 @@ async def test_coop_answers_player_while_reflect_writes_instruction(cfg, tmp_pat
     assert b.doing_text() == "Kevin's current action: playing on his own"
 
     await b.on_heard(Heard("Kevin, follow me.", turn_id="1-mic"))
-    await b.reflect_task
     assert b.memory.feed[-1] == "Kevin: Right behind you."
-    assert path.read_text() == "follow the player\n"
+    while path.read_text() != "follow the player\n":  # before the lists are written
+        await asyncio.sleep(0.01)
     assert b.doing_text() == "Kevin's current action: follow the player"
+    assert b.memory.orders == []
+    lists.set()
+    await b.reflect_task
+    assert b.memory.orders == ["Follow John"]
     request = reflects[0]
     assert request["chat_template_kwargs"]["enable_thinking"] is False
     assert "thinking_budget_tokens" not in request
-    assert "instruction" in request["response_format"]["json_schema"]["schema"]["required"]
+    assert request["response_format"]["json_schema"]["schema"]["required"][0] == "instruction"
     entries = [e["data"] for e in trace.entries if e["kind"] == "reflect"]
     assert [e["interrupted"] for e in entries] == [False]
+    assert [e["data"]["text"] for e in trace.entries if e["kind"] == "instruction"] == [
+        "",
+        "follow the player",
+    ]
 
     await b.on_new_game("a30")
     assert path.read_text() == "\n"
