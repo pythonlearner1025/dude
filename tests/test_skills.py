@@ -159,10 +159,15 @@ class Link:
     async def send_json(self, message):
         self.sent.append(message)
 
+    async def view(self, timeout):
+        from m8py.link import View
+
+        return View(4, 2, bytearray(range(24)), [])
+
 
 @pytest.mark.asyncio
-async def test_play_decides_retries_and_writes_tickets(cfg, library, tmp_path):
-    answers = iter(["dance", "flank grunt#31", "nofit push them off | attack grunt#31"])
+async def test_play_decides_retries_and_traces_for_the_coach(cfg, library, tmp_path):
+    answers = iter(["dance", "flank grunt#31", "attack grunt#31"])
     requests = []
 
     def handler(request):
@@ -170,9 +175,7 @@ async def test_play_decides_retries_and_writes_tickets(cfg, library, tmp_path):
         return sse(next(answers))
 
     cfg.kev = None
-    cfg.actor = ActorConfig(
-        model="m", library=library.directory, tickets=tmp_path / "tickets", provider="together"
-    )
+    cfg.actor = ActorConfig(model="m", library=library.directory, provider="together")
     trace = Trace(tmp_path / "logs")
     trace.start()
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -184,24 +187,24 @@ async def test_play_decides_retries_and_writes_tickets(cfg, library, tmp_path):
     assert body["provider"] == {"only": ["together"], "allow_fallbacks": False}
     assert body["reasoning"] == {"enabled": False}
     assert "flank(target, side='right')" in body["messages"][0]["content"]
+    assert "nofit" not in body["messages"][0]["content"]
     assert "grunt#31 10 m" in body["messages"][1]["content"]
     assert "Orders: hold fire." in body["messages"][1]["content"]
     assert "could not run" in requests[1]["messages"][1]["content"]
-    await play.decide(['the player said "push them off the ridge"'])
-    answers = iter(
-        ["nofit shoot it now | attack grunt#31", "nofit go to the pod | attack grunt#31"]
-    )
-    await play.decide(['the player said "shoot it now"'])  # attack's phrases cover it: no ticket
-    await play.decide(["attack grunt#31 failed: path blocked"])  # not the player's: no ticket
-    tickets = list((tmp_path / "tickets").glob("*.json"))
-    assert [json.loads(t.read_text())["order"] for t in tickets] == ["push them off"]
-    recent = json.loads(tickets[0].read_text())["recent"]
-    assert recent[-1].endswith(
-        'the player said "push them off the ridge" => nofit push them off | attack grunt#31'
-    )
-    await asyncio.sleep(0)
+    play.trigger('the player said "kill him"')  # a frame of what the player sees
+    await play.decide(['the player said "kill him"'])
+    for _ in range(20):
+        await asyncio.sleep(0.01)
     await client.aclose()
     await trace.close()
+    rows = [json.loads(line) for line in (trace.session_dir / "trace.jsonl").open()]
+    kinds = [row["kind"] for row in rows]
+    assert "ticket" not in kinds and kinds.count("decision") == 2
+    seen = next(row["data"] for row in rows if row["kind"] == "state")
+    assert seen["kevin"]["pos"] == [0.0, 0.0, 0.0] and seen["enemies"][0]["id"] == "31"
+    view = next(row["data"] for row in rows if row["kind"] == "view")
+    assert view["why"] == "the player spoke"
+    assert (trace.session_dir / view["file"]).read_bytes()[:2] == b"\xff\xd8"  # a JPEG
 
 
 def test_seed_library_passes_skilltest():
@@ -212,34 +215,91 @@ def test_seed_library_passes_skilltest():
     assert check(Path(__file__).parents[1] / "kevin-skills") == []
 
 
-def test_coach_takes_oldest_ticket_and_one_review(tmp_path):
-    from m8py.coach import pending
+def session_trace(logs, rows):
+    session = logs / "1793000000"
+    (session / "views").mkdir(parents=True)
+    (session / "views" / "1793000005000.jpg").write_bytes(b"\xff\xd8 a frame")
+    with (session / "trace.jsonl").open("w") as out:
+        for i, (t, kind, data) in enumerate(rows):
+            out.write(json.dumps({"id": str(i), "t": str(t), "kind": kind, "data": data}) + "\n")
+    return session / "trace.jsonl"
 
-    for name in ["1-new_order", "2-review", "3-failure", "4-review"]:
-        (tmp_path / f"{name}.json").write_text("{}")
-    (tmp_path / "3-failure.result.md").write_text("done")
-    assert [p.stem for p in pending(tmp_path)] == ["1-new_order", "4-review"]
-    assert (tmp_path / "2-review.result.md").exists()
+
+PLAYED = [
+    (
+        1793000001000,
+        "state",
+        {
+            "level": "a30",
+            "kevin": {"pos": [0, 0, 0], "health": 1.0},
+            "player": {"pos": [0, -5, 0], "aim": None},
+            "enemies": [],
+        },
+    ),
+    (1793000002000, "heard", {"text": "Kevin, take point."}),
+    (
+        1793000002300,
+        "decision",
+        {
+            "reasons": ['the player said "Kevin, take point."'],
+            "answer": "lead",
+            "kind": "start",
+            "ms": 190,
+        },
+    ),
+    (1793000002400, "body", {"sent": [{"action": "go_point", "option": "0,6,0"}]}),
+    (1793000003000, "decision", {"reasons": ["heartbeat"], "answer": "keep", "kind": "keep"}),
+    (1793000004000, "event", {"text": "Chief shot Kevin."}),
+    (1793000005000, "view", {"file": "views/1793000005000.jpg", "why": "the player spoke"}),
+    (1793000009000, "skill", {"skill": "lead", "args": {}, "failed": "blocked"}),
+]
 
 
-def test_coach_commits_land_in_the_library(tmp_path):
+def test_observation_packet(tmp_path):
+    from m8py.observe import active, build, render, rows_between
+
+    trace = session_trace(tmp_path, PLAYED)
+    assert active(rows_between(trace, 0, 1793000001500)) is False  # only the game's state
+    packet = build(trace, 0, 1793000009000, "s-001", {"head": "abc1234"}, None)
+    assert packet["level"] == "a30" and packet["counts"]["player_lines"] == 1
+    assert packet["counts"]["heartbeat_keeps"] == 1 and packet["counts"]["friendly_fire"] == 1
+    assert [e["type"] for e in packet["timeline"]] == [
+        "state",
+        "player",
+        "decision",
+        "command",
+        "game",
+        "frame",
+        "skill",
+    ]
+    text = render(packet)
+    assert 'PLAYER   "Kevin, take point."' in text and "=> lead (190 ms)" in text
+    assert "SKILL    lead -> FAILED: blocked" in text and "HALO     go_point 0,6,0" in text
+
+
+def test_coach_looks_on_a_heartbeat(tmp_path):
     import subprocess
 
-    from m8py.coach import handle
+    from m8py.coach import look
 
     library, other = tmp_path / "library", tmp_path / "other"
     for repo in (library, other):
         (repo / "skills").mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    ticket = tmp_path / "1-review.json"
-    ticket.write_text('{"trace": "%s"}' % (other / "trace.jsonl"))
+    trace = session_trace(tmp_path / "logs", PLAYED)
     claude = tmp_path / "claude"
     claude.write_text(  # Claude's shell wandered into another repo, then committed
         f"#!/bin/sh\ncd {other} && touch $GIT_WORK_TREE/skills/new.py && git add -A && "
         "git -c user.name=c -c user.email=c@c commit -qm fix\n"
     )
     claude.chmod(0o755)
-    assert handle(ticket, library, "m", 30, str(claude))
+    out = tmp_path / "observations"
+    assert look(trace, library, out, 1, "m", "high", 30, str(claude)) == "looked"
+    packet = out / "1793000000" / "001"
+    assert "take point" in (packet / "packet.md").read_text()
+    assert (packet / "frames" / "1793000005000.jpg").exists()
+    assert "stopped without a result" in (packet / "result.md").read_text()
     log = ["git", "log", "--format=%s"]
     assert subprocess.run(log, cwd=library, capture_output=True, text=True).stdout == "fix\n"
     assert subprocess.run(log, cwd=other, capture_output=True, text=True).returncode != 0
+    assert look(trace, library, out, 1, "m", "high", 30, str(claude)) == "waiting"  # seen it all

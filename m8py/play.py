@@ -1,18 +1,20 @@
 """Skill mode (docs/design/kevin-skill-loop.html): the runner steps Kevin's current skill on every
 game state; the actor picks the next skill when something happens (a player line, a skill
-ending, a game event) and on a heartbeat in combat; tickets ask the coach for new or fixed
-skills. Library changes load between skills."""
+ending, a game event) and on a heartbeat in combat. Library changes load between skills.
+
+Nothing here talks to the coach: the trace is the whole record (Kevin's state once a second,
+frames of the player's view, every decision, skill ending and command), and the coach reads it
+on its own heartbeat (m8py/observe.py)."""
 
 from __future__ import annotations
 
 import asyncio
-import json
-import re
+import subprocess
 import time
-from collections import deque
 from typing import Any, Callable
 
 import httpx
+from PIL import Image
 
 from .actor import Actor, Decision, parse
 from .body import Body
@@ -21,23 +23,30 @@ from .skills import Done, Failed, Library, Runner, Running
 from .trace import Trace
 
 HEARTBEAT = 3.0  # seconds between decisions while enemies are around, with nothing new
-REVIEW = 600.0  # seconds of play between review tickets
+STATE_EVERY = 1.0  # seconds between state lines in the trace
+FRAME_EVERY = 10.0  # seconds between frames of the player's view, and after each player line
+FRAME_WIDTH = 640
 RULES = (
     "You choose what Kevin, the player's Marine teammate in Halo, does next. Answer with ONE "
     "line and nothing else:\n"
-    "  <skill> <args>                  start this skill now (args in order, or name=value)\n"
-    "  keep                            the running skill still fits\n"
-    "  nofit <order> | <skill> <args>  no skill does what the player asked; do the nearest one "
-    "meanwhile\n"
+    "  <skill> <args>   start this skill now (args in order, or name=value)\n"
+    "  keep             the running skill still fits\n"
     "Enemies are named kind#id (grunt#31). Protect the player; never shoot them.\n"
     "- Standing orders (hold fire, stay close, stay behind me) hold until the player changes "
     "them. A one-off order (flank him, go there, take that out) is over when its skill ends.\n"
     "- When a skill's description matches what the player asked, answer with that skill, even "
-    "if it can't succeed right now (no enemies, no target): it will report why. nofit is only "
-    "for something the player just asked, in their own words, that no skill's description "
-    "matches; never for a skill that failed or for anything the player didn't say.\n"
+    "if it can't succeed right now (no enemies, no target): it will report why. When none "
+    "does, answer with the nearest one.\n"
     "- Don't start again a skill that just failed for the same reason; pick another or follow."
 )
+
+
+def rounded(value: Any) -> Any:
+    if isinstance(value, float):
+        return round(value, 2)
+    if isinstance(value, list):
+        return [rounded(v) for v in value]
+    return value
 
 
 class Play:
@@ -61,12 +70,10 @@ class Play:
         self.wake = asyncio.Event()
         self.last: str = "nothing yet"
         self.last_decision = 0.0
-        self.failures: dict[str, list[float]] = {}
-        self.ticketed: set[str] = set()
-        self.next_review = time.monotonic() + REVIEW
-        self.decisions = 0
         self.retried = False
-        self.story: deque[str] = deque(maxlen=80)  # recent decisions and skill ends, for tickets
+        self.traced_state = 0.0
+        self.last_frame = 0.0
+        self.framing = False
 
     # ---------- the game's side
 
@@ -76,22 +83,85 @@ class Play:
         self.body.update(state)
         if self.runner.current is None and self.library.changed():
             self.library.load()
+            head = subprocess.run(
+                ["git", "-C", str(self.library.directory), "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
             self.trace.add(
-                "library", {"skills": sorted(self.library.skills), "errors": self.library.errors}
+                "library",
+                {
+                    "head": head,
+                    "skills": sorted(self.library.skills),
+                    "errors": self.library.errors,
+                },
             )
         self.runner.tick()
         if self.body.outbox:
             outbox, self.body.outbox = self.body.outbox, []
             self.trace.add("body", {"sent": outbox})
             asyncio.get_running_loop().create_task(self._send(outbox))
+        if time.monotonic() - self.traced_state >= STATE_EVERY:
+            self.traced_state = time.monotonic()
+            self._trace_state()
+
+    def _trace_state(self) -> None:
+        me, player = self.body.me, self.body.player
+        aim = player.get("aim") or {}
+        nearest = sorted(self.body.enemies, key=lambda e: e.get("distance_m", 0))[:6]
+        keys = ("id", "kind", "pos", "distance_m", "in_sight", "health")
+        self.trace.add(
+            "state",
+            {
+                "level": self.body.state.get("level"),
+                "kevin": {
+                    **{k: rounded(me.get(k)) for k in ("pos", "facing", "health", "shields")},
+                    "activity": me.get("activity"),
+                    "target": (me.get("target") or {}).get("label"),
+                },
+                "player": {
+                    **{k: rounded(player.get(k)) for k in ("pos", "facing", "health", "shields")},
+                    "aim": {k: rounded(aim.get(k)) for k in ("label", "distance_m", "pos")}
+                    if aim
+                    else None,
+                },
+                "enemies": [{k: rounded(e.get(k)) for k in keys} for e in nearest],
+                "running": self.doing(),
+            },
+        )
 
     async def _send(self, messages: list[dict[str, Any]]) -> None:
         for message in messages:
             await self.link.send_json(message)
 
+    async def frame(self, why: str) -> None:
+        """Saves what the player sees, small, for the coach."""
+        if self.framing or not hasattr(self.link, "view"):
+            return
+        self.framing, self.last_frame = True, time.monotonic()
+        try:
+            view = await self.link.view(2.0)
+            if view is None:
+                return
+            name = f"views/{int(time.time() * 1000)}.jpg"
+            path = self.trace.session_dir / name
+
+            def save() -> None:
+                image = Image.frombytes("RGB", (view.width, view.height), bytes(view.rgb))
+                image.thumbnail((FRAME_WIDTH, FRAME_WIDTH))
+                path.parent.mkdir(exist_ok=True)
+                image.save(path, quality=70)
+
+            await asyncio.to_thread(save)
+            self.trace.add("view", {"file": name, "why": why})
+        finally:
+            self.framing = False
+
     def trigger(self, reason: str) -> None:
         self.reasons.append(reason)
         self.wake.set()
+        if reason.startswith("the player said") and self.body.state:
+            asyncio.get_running_loop().create_task(self.frame("the player spoke"))
 
     def reset(self) -> None:
         self.runner.stop()
@@ -111,15 +181,6 @@ class Play:
             "skill", {"skill": running.skill.name, "args": running.args, verb: result.reason}
         )
         print(f"[skill] {self.last}", flush=True)
-        self.story.append(f"{time.strftime('%H:%M:%S')} {self.last}")
-        if isinstance(result, Failed):
-            now = time.monotonic()
-            recent = [t for t in self.failures.get(running.skill.name, []) if now - t < 180] + [now]
-            self.failures[running.skill.name] = recent
-            if result.reason.startswith("error") or len(recent) >= 2:
-                self.ticket(
-                    "failure", skill=running.skill.name, args=running.args, reason=result.reason
-                )
         self.trigger(f"{running.display()} {verb}: {result.reason}")
 
     # ---------- deciding
@@ -156,6 +217,7 @@ class Play:
         )
 
     async def run(self) -> None:
+        asyncio.get_running_loop().create_task(self._frames())
         while True:
             try:
                 await asyncio.wait_for(self.wake.wait(), HEARTBEAT)
@@ -179,29 +241,25 @@ class Play:
                     self.retried = True
                     self.reasons[:0] = [r for r in reasons if r != "heartbeat"]
                     self.wake.set()
-            if time.monotonic() > self.next_review and self.decisions:
-                self.next_review = time.monotonic() + REVIEW
-                self.ticket("review", decisions=self.decisions)
+
+    async def _frames(self) -> None:
+        while True:
+            await asyncio.sleep(1.0)
+            if self.body.state and time.monotonic() - self.last_frame >= FRAME_EVERY:
+                await self.frame(f"every {FRAME_EVERY:.0f} s")
 
     async def decide(self, reasons: list[str]) -> Decision:
         system, user = self.system(), self.digest(reasons)
         answer, ms, usage = await self.actor.ask(system, user)
         decision = parse(answer, self.library)
-        asked = any(reason.startswith("the player said") for reason in reasons)
-        if decision.kind != "keep" or reasons != ["heartbeat"]:
-            self.story.append(f"{time.strftime('%H:%M:%S')} {' / '.join(reasons)} => {answer}")
-        error = self.apply(decision, asked)
+        error = self.apply(decision)
         retry = None
         if error:  # one more try, told why
             again = f'{user}\n\nYour answer "{answer}" could not run: {error}. Answer again.'
             retry, more, _ = await self.actor.ask(system, again)
             ms += more
             decision = parse(retry, self.library)
-            self.story.append(f"  (could not run: {error}) => {retry}")
-            error = self.apply(decision, asked)
-            if error:
-                self.story.append(f"  (could not run: {error})")
-        self.decisions += 1
+            error = self.apply(decision)
         self.last_decision = time.monotonic()
         self.trace.add(
             "decision",
@@ -221,43 +279,12 @@ class Play:
         print(f"[actor] {retry or answer} ({ms} ms) <- {' / '.join(reasons)[:120]}", flush=True)
         return decision
 
-    def apply(self, decision: Decision, asked: bool = True) -> str | None:
-        """Starts the decided skill. A nofit becomes a ticket only when the player just spoke:
-        the actor also says nofit about failed skills and orders it made up."""
+    def apply(self, decision: Decision) -> str | None:
+        """Starts the decided skill; an error message if it can't."""
         if decision.kind == "keep":
             return None
         if decision.kind == "invalid":
             return decision.error
-        fresh = decision.order and decision.order not in self.ticketed
-        if decision.kind == "nofit" and decision.skill and decision.order:
-            # (the actor also says nofit for an order its skill names but can't do now)
-            phrases = re.findall(r'"([^"]+)"', self.library.skills[decision.skill].when)
-            if any(phrase.lower() in decision.order.lower() for phrase in phrases):
-                fresh = False
-        if decision.kind == "nofit" and asked and fresh:
-            self.ticketed.add(decision.order)
-            self.ticket(
-                "new_order", order=decision.order, meanwhile=decision.skill, args=decision.args
-            )
         if decision.skill:
             return self.runner.start(decision.skill, decision.args)
         return None
-
-    # ---------- the coach's tickets
-
-    def ticket(self, kind: str, **about: Any) -> None:
-        self.cfg.tickets.mkdir(parents=True, exist_ok=True)
-        ident = f"{time.strftime('%Y%m%d-%H%M%S')}-{kind}"
-        ticket = {
-            "id": ident,
-            "kind": kind,
-            **about,
-            "level": self.body.state.get("level"),
-            "state": self.digest([]) if self.body.state else "",
-            "recent": list(self.story),
-            "trace": str(self.trace.session_dir / "trace.jsonl"),
-            "library_errors": self.library.errors,
-        }
-        (self.cfg.tickets / f"{ident}.json").write_text(json.dumps(ticket, indent=1))
-        self.trace.add("ticket", ticket)
-        print(f"[coach] ticket {ident}", flush=True)

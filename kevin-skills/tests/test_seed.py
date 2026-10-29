@@ -29,7 +29,7 @@ def test_behind_aim_goes_past_the_boulder_away_from_the_nearest_enemy():
 def test_lead_goes_ahead_of_the_player():
     _, sent = run_skill(LIBRARY, "lead", situation("calm"))
     x, y, _ = first_point(sent)
-    assert abs(x) < 0.5 and y > 0
+    assert 3 < abs(x) < 5 and y > 0  # beside the player's path, not on it
 
 
 def test_hold_fire_and_attack_end():

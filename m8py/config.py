@@ -43,12 +43,11 @@ class P2PConfig:
 
 @dataclass(slots=True)
 class ActorConfig:
-    """Skill mode: a fast hosted model (OpenRouter) picks Kevin's skills from `library`; tickets
-    for the coach (a frontier model in Claude Code) go to `tickets`."""
+    """Skill mode: a fast hosted model (OpenRouter) picks Kevin's skills from `library`, which
+    the coach (a frontier model in Claude Code, watching the trace) keeps up."""
 
     model: str
     library: Path
-    tickets: Path
     url: str = "https://openrouter.ai/api/v1/chat/completions"
     provider: str | None = None
     key_env: str = "OPENROUTER_API_KEY"
@@ -126,7 +125,6 @@ class Config:
         actor = dict(raw["actor"]) if "actor" in raw else None
         if actor:
             actor["library"] = resolved(actor["library"])
-            actor["tickets"] = resolved(actor["tickets"])
         p2p = dict(raw["p2p"]) if "p2p" in raw else None
         if p2p:
             p2p["instruction"] = resolved(p2p["instruction"])

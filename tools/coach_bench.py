@@ -1,40 +1,38 @@
-"""Re-runs a coach ticket with another model or effort, on a fresh clone of the skill library at
-the commit before the coach's own fix, and prints the time, turns, cost and diff.
+"""Re-runs the coach on an observation packet with another model or effort, on a fresh clone of
+the skill library at a given commit, and prints the time, turns, cost and what it committed.
 
-Usage: python tools/coach_bench.py <ticket.json> <base commit> <model> <effort> <workdir>
+Usage: python tools/coach_bench.py <packet dir> <library commit> <model> <effort> <workdir>
 """
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from m8py.coach import handle
+from m8py.coach import asking, run_claude
 
-ticket, base, model, effort, work = Path(sys.argv[1]), *sys.argv[2:5], Path(sys.argv[5])
-library, tickets = work / "library", work / "tickets"
+packet, base, model, effort, work = Path(sys.argv[1]), *sys.argv[2:5], Path(sys.argv[5])
+library, copy = work / "library", work / "packet"
 subprocess.run(["git", "clone", "-q", str(Path.home() / "m8work/kevin-skills"), str(library)])
 subprocess.run(["git", "-C", str(library), "checkout", "-q", base], check=True)
 for key, value in (("user.name", "Kevin coach"), ("user.email", "coach@localhost")):
     subprocess.run(["git", "-C", str(library), "config", key, value], check=True)
-tickets.mkdir(parents=True, exist_ok=True)
-copy = tickets / ticket.name
-copy.write_text(ticket.read_text())
-handle(copy, library, model, 900, str(Path.home() / ".npm-global/bin/claude"), effort)
-result = next(
-    json.loads(line)
-    for line in copy.with_suffix(".log").read_text().splitlines()[::-1]
-    if line.startswith('{"type":"result"')
+shutil.copytree(packet, copy, ignore=shutil.ignore_patterns("claude.log", "result.md"))
+text = (copy / "packet.md").read_text().replace(str(packet), str(copy))
+(copy / "packet.md").write_text(text)
+seconds = json.loads((copy / "packet.json").read_text())["window"]["seconds"]
+claude = str(Path.home() / ".npm-global/bin/claude")
+status = run_claude(
+    asking(copy, seconds), library, [copy], copy / "claude.log", model, effort, 900, claude
+)
+result = {}
+for line in (copy / "claude.log").read_text().splitlines():
+    if '"type":"result"' in line:
+        result = json.loads(line)
+print(
+    f"{packet.name} {model} {effort}: {status}, {result.get('duration_ms', 0) / 1000:.0f} s, "
+    f"{result.get('num_turns')} turns, ${result.get('total_cost_usd', 0):.2f}"
 )
 log = ["git", "-C", str(library), "log", "--format=%h %s", f"{base}..HEAD"]
-print(
-    f"{ticket.stem} {model} {effort}: {result['duration_ms'] / 1000:.0f} s, "
-    f"{result['num_turns']} turns, ${result['total_cost_usd']:.2f}, "
-    f"{result['usage']['output_tokens']} output tokens"
-)
 print(subprocess.run(log, capture_output=True, text=True).stdout.strip() or "(no commit)")
-print(
-    subprocess.run(
-        ["git", "-C", str(library), "diff", "--stat", base], capture_output=True, text=True
-    ).stdout.strip()
-)

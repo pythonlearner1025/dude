@@ -21,12 +21,11 @@ port = 8091
 url = "http://127.0.0.1:8083/v1/audio/transcriptions"
 
 # Skill mode (docs/design/kevin-skill-loop.html): no Kev. The actor (DeepSeek V4.1 Flash on
-# Together, through OpenRouter) picks Kevin's skills from the library; tickets go to the coach.
+# Together, through OpenRouter) picks Kevin's skills from the library; the coach watches the trace.
 [actor]
 model = "deepseek/deepseek-v4.1-flash-1017"
 provider = "together"
 library = "../../kevin-skills"
-tickets = "../../run/tickets"
 
 [llm]
 url = "http://127.0.0.1:8081/v1/chat/completions"

@@ -103,7 +103,7 @@ class Library:
 
     def catalog(self, tags: set[str]) -> list[Skill]:
         """Every skill while they fit in MAX_CATALOG, core first; past that, the core skills
-        and those tagged for the moment (a skill left out can only be answered with nofit)."""
+        and those tagged for the moment (a skill left out can't be picked)."""
         core = [s for s in self.skills.values() if "core" in s.tags]
         if len(self.skills) <= MAX_CATALOG:
             return core + [s for s in self.skills.values() if "core" not in s.tags]
