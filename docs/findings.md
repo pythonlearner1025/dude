@@ -399,7 +399,8 @@ beside Voice, and writes Open-P2P's one-line instruction (`configs/b650s-coop.to
   beside Voice and TTS: 2.9 and 4.5 s. With the instruction first and streamed, it reached
   Open-P2P 0.97 s after the line (the whole Reflect still 2.9 s).
 - *Every level:* a hidden local host and Kevin's client got into a30, a50, b30, b40, c10, c20, c40,
-  d20 and d40 within 9-45 s. a10 opens with a long cutscene: Kevin was still unspawned after 60 s.
+  d20 and d40 within 9-45 s. a10: both connected, but the idle host stayed in the cryo tube (its
+  intro waits for the player) and Kevin was still unspawned after 4 min; untested with a real host.
 - *Kevin's mouse left his window.* Halo frees the cursor in menus, loading and without focus, so the
   model's motion moved a real cursor and its clicks could land on other windows. Also, the client
   picked the largest window titled "Halo" as well as Kevin's PID, so a browser host won. Now: PID
