@@ -44,14 +44,14 @@ def pending(tickets: Path) -> list[Path]:
 SIGNED_OUT = ("Please run /login", "authentication_error", "Invalid API key")
 
 
-def handle(ticket: Path, library: Path, model: str, timeout: float) -> bool:
+def handle(ticket: Path, library: Path, model: str, timeout: float, claude: str = "claude") -> bool:
     """Runs Claude on one ticket; False if Claude Code isn't signed in (the ticket waits)."""
     prompt = (
         f"Resolve the ticket {ticket}. Follow CLAUDE.md in this directory: change the skills "
         f"or the actor's prompt as the ticket needs, run the skill tests until they print ok, "
         f"commit, then write {ticket.with_suffix('.result.md')}."
     )
-    command = ["claude", "-p", prompt, "--model", model, "--permission-mode", "acceptEdits"]
+    command = [claude, "-p", prompt, "--model", model, "--permission-mode", "acceptEdits"]
     command += ["--allowedTools", *TOOLS]
     started = time.monotonic()
     with ticket.with_suffix(".log").open("w") as log:
@@ -81,13 +81,16 @@ def main() -> None:
     parser.add_argument("--model", default="claude-opus-5-5")
     parser.add_argument("--timeout", type=float, default=1200)
     parser.add_argument("--once", action="store_true", help="handle what is waiting, then stop")
+    parser.add_argument("--claude", default="claude", help="the Claude Code command")
     args = parser.parse_args()
     args.tickets.mkdir(parents=True, exist_ok=True)
     print(f"[coach] watching {args.tickets}", flush=True)
     while True:
         waiting = pending(args.tickets)
         if waiting:
-            if not handle(waiting[0], args.library.resolve(), args.model, args.timeout):
+            if not handle(
+                waiting[0], args.library.resolve(), args.model, args.timeout, args.claude
+            ):
                 time.sleep(300)
         elif args.once:
             return

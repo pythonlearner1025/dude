@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The coach: Claude Code with Opus works through m8py's tickets in the skill library
-# (m8py/coach.py). Needs Claude Code signed in (`claude`, then /login) on this machine.
+# (m8py/coach.py). It signs in with the long-lived token from `claude setup-token`, kept in
+# notes/claude-coach.env (CLAUDE_CODE_OAUTH_TOKEN=..., mode 600).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/_pid.sh"
@@ -10,9 +11,16 @@ if pidfile_live "$pidfile"; then
     echo "The coach is already running (PID $(pidfile_pid "$pidfile"))."
     exit 0
 fi
+if [[ -f "$ROOT/notes/claude-coach.env" ]]; then
+    set -a
+    source "$ROOT/notes/claude-coach.env"
+    set +a
+fi
+claude="$HOME/.npm-global/bin/claude"  # current Claude Code; /usr/local's is old
+[[ -x "$claude" ]] || claude=claude
 cd "$ROOT/dude"
-PYTHONUNBUFFERED=1 nohup .venv/bin/python -m m8py.coach --library "$ROOT/kevin-skills" \
-    --tickets "$ROOT/run/tickets" </dev/null >>"$ROOT/logs/coach.log" 2>&1 &
+PYTHONUNBUFFERED=1 setsid nohup .venv/bin/python -m m8py.coach --library "$ROOT/kevin-skills" \
+    --tickets "$ROOT/run/tickets" --claude "$claude" </dev/null >>"$ROOT/logs/coach.log" 2>&1 &
 pid=$!
 write_pidfile "$pid" "$pidfile"
 echo "Started the coach (PID $pid, log $ROOT/logs/coach.log)."
