@@ -18,6 +18,9 @@ from .trace import Trace, now_ms
 
 SAMPLE_RATE, VAD_WINDOW = 16000, 512
 MARGIN_BEFORE, MARGIN_AFTER, KEPT = 3200, 1600, 400000
+# Silero's max_speech_duration only raises its threshold: continuous sound kept it "in speech"
+# for minutes, its buffer growing and every Kevin line cut by barge-in. Cut it here instead.
+MAX_SPEECH_SECONDS = 20
 
 
 def wav(samples: np.ndarray | list[float], rate: int = SAMPLE_RATE) -> bytes:
@@ -116,6 +119,7 @@ class Listener:
         self.silence = 0
         self.accepted = 0
         self.vad_origin = 0
+        self.speech_since: int | None = None
         self.threshold = cfg.mic.vad_threshold
         self._vad = self._create_vad()
 
@@ -161,6 +165,13 @@ class Listener:
             self.accepted += VAD_WINDOW
             if self._vad is not None:
                 self._vad.accept_waveform(window.tolist())
+                if not self._vad.is_speech_detected():
+                    self.speech_since = None
+                elif self.speech_since is None:
+                    self.speech_since = self.accepted
+                elif self.accepted - self.speech_since > MAX_SPEECH_SECONDS * SAMPLE_RATE:
+                    self._vad.flush()
+                    self.speech_since = None
                 while not self._vad.empty():
                     seg = self._vad.front
                     start = self.vad_origin + max(0, int(seg.start))

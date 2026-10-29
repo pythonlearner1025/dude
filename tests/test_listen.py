@@ -146,3 +146,47 @@ async def test_game_websocket_is_a_byte_stream_and_replaces_tcp(cfg):
     tcp_writer.close()
     await runner.cleanup()
     await link.close()
+
+
+class EndlessSpeechVad:
+    """Reports speech forever; a segment appears only when flushed."""
+
+    def __init__(self):
+        self.flushes = 0
+        self.queue = []
+
+    def accept_waveform(self, samples):
+        pass
+
+    def is_speech_detected(self):
+        return True
+
+    def flush(self):
+        self.flushes += 1
+        self.queue.append(type("Segment", (), {"start": 0, "samples": [0.0] * 512})())
+
+    def empty(self):
+        return not self.queue
+
+    @property
+    def front(self):
+        return self.queue[0]
+
+    def pop(self):
+        self.queue.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_endless_speech_is_cut_into_segments(cfg):
+    heard = []
+
+    async def output(text, timing, turn_id):
+        heard.append(text)
+
+    listener = RealListener(cfg, Transcriber(), 16000, output)
+    listener._vad = EndlessSpeechVad()
+    for _ in range(45):
+        await listener.feed(np.zeros(16000, np.float32))
+
+    assert listener._vad.flushes == 2
+    assert heard == ["testing", "testing"]
