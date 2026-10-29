@@ -400,9 +400,7 @@ class Brain:
             "status": current.status,
         }
         self.trace.add("validator", data)
-        self._reflect_log(
-            f"Kevin action: {current.display()} — {current.status}."
-        )
+        self._reflect_log(f"Kevin action: {current.display()} — {current.status}.")
 
     def _validator_failed(self, current: ActionStatus) -> None:
         self._request_reflect(f"{current.display()} failed or made no progress")
@@ -447,8 +445,8 @@ class Brain:
             system += (
                 "Instruction is what Kevin's body does right now to carry out his orders and "
                 "the player's newest request: one short plain command such as \"follow the "
-                "player\", \"move forward\", \"shoot the enemies\" or \"take cover behind the "
-                "rocks\". Keep it unchanged while it still applies; leave it empty when there "
+                'player", "move forward", "shoot the enemies" or "take cover behind the '
+                'rocks". Keep it unchanged while it still applies; leave it empty when there '
                 "is nothing to do but play along. Output JSON only with exactly: instruction, "
                 "then orders and remember, each the full replacement list of short strings."
             )
@@ -626,9 +624,7 @@ class Brain:
             speak = not noise
         else:
             speak = ask_speak and float(answers.get("speak", {}).get("noul", 0)) >= 0.5
-        is_command = to_player and float(
-            answers.get("is_command", {}).get("noul", 0)
-        ) >= 0.5
+        is_command = to_player and float(answers.get("is_command", {}).get("noul", 0)) >= 0.5
         if is_command:
             self._request_reflect("the player's newest line is a command")
         data = {

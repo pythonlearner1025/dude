@@ -102,8 +102,11 @@ class Library:
         self.skills = loaded
 
     def catalog(self, tags: set[str]) -> list[Skill]:
-        """The core skills, then those tagged for the moment, at most MAX_CATALOG."""
+        """Every skill while they fit in MAX_CATALOG, core first; past that, the core skills
+        and those tagged for the moment (a skill left out can only be answered with nofit)."""
         core = [s for s in self.skills.values() if "core" in s.tags]
+        if len(self.skills) <= MAX_CATALOG:
+            return core + [s for s in self.skills.values() if "core" not in s.tags]
         fitting = [s for s in self.skills.values() if "core" not in s.tags and tags & set(s.tags)]
         return (core + fitting)[:MAX_CATALOG]
 
@@ -146,6 +149,7 @@ class Runner:
         if not inspect.isgenerator(steps):
             return f"{name} is not a generator"
         self.stop()
+        self.body.fresh()
         self.current = Running(found, args, steps)
         return None
 

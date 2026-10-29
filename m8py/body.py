@@ -121,6 +121,10 @@ class Body:
 
     # ---------- what Kevin does
 
+    def fresh(self) -> None:
+        """A new skill: its first commands are sent even if the last skill's were the same."""
+        self._sent, self._goal = None, None
+
     def do(self, action: str, option: Any = None, every: float = 0.0) -> None:
         """Any companion action; the same one again is sent only after `every` seconds."""
         key = (action, None if option is None else str(option))

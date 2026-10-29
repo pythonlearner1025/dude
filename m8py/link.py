@@ -85,9 +85,7 @@ class GameLink:
             writer.close()
             print(f"[game] disconnected {peer}", flush=True)
 
-    async def websocket_connected(
-        self, request: web.Request, ws: web.WebSocketResponse
-    ) -> None:
+    async def websocket_connected(self, request: web.Request, ws: web.WebSocketResponse) -> None:
         """Use a WebSocket as the newest game link, treating messages as a byte stream."""
         old_writer = self.writer
         old_websocket = self.websocket

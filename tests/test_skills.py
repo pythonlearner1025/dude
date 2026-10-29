@@ -6,6 +6,7 @@ import time
 import httpx
 import pytest
 
+from m8py import skills
 from m8py.actor import parse
 from m8py.body import Body
 from m8py.config import ActorConfig
@@ -13,7 +14,7 @@ from m8py.play import Play
 from m8py.skills import Done, Failed, Library, Runner
 from m8py.trace import Trace
 
-SKILLS = '''
+SKILLS = """
 from m8py.skills import Done, Failed, skill
 
 
@@ -47,7 +48,7 @@ def flank(k, target, side="right"):
 def broken(k):
     yield
     raise ValueError("bad")
-'''
+"""
 
 
 def state(enemies=()):
@@ -74,7 +75,12 @@ def library(tmp_path):
 
 def test_library_catalog_and_hot_reload(library, tmp_path):
     assert sorted(library.skills) == ["attack", "broken", "flank", "follow"]
-    assert [s.name for s in library.catalog({"combat"})] == ["follow", "attack", "flank"]
+    assert [s.name for s in library.catalog(set())] == ["follow", "attack", "flank", "broken"]
+    skills.MAX_CATALOG, saved = 3, skills.MAX_CATALOG  # past the limit, tags choose
+    try:
+        assert [s.name for s in library.catalog({"combat"})] == ["follow", "attack", "flank"]
+    finally:
+        skills.MAX_CATALOG = saved
     assert library.skills["flank"].line().startswith("flank(target, side=right)  go around")
     assert not library.changed()
     path = tmp_path / "skills" / "basic.py"
@@ -99,6 +105,12 @@ def test_runner_steps_ends_and_composes(library):
     body.update(state())  # the grunt is gone
     runner.tick()
     assert ended == [Done("target down")] and runner.current is None
+    body.go([5.0, 0.0, 0.0])
+    sent = len(body.outbox)
+    runner.start("flank", {"target": "grunt#31"})  # a new skill sends its first command again
+    body.update(state([("31", [10.0, 0.0, 0.0])]))
+    runner.tick()
+    assert len(body.outbox) == sent + 1 and not body.stuck(0.1)
     runner.start("broken", {})
     runner.tick()
     runner.tick()

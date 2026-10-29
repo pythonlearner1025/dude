@@ -57,6 +57,7 @@ class Play:
         self.ticketed: set[str] = set()
         self.next_review = time.monotonic() + REVIEW
         self.decisions = 0
+        self.retried = False
 
     # ---------- the game's side
 
@@ -159,9 +160,16 @@ class Play:
             reasons, self.reasons = self.reasons, []
             try:
                 await self.decide(reasons)
+                self.retried = False
             except Exception as exc:
-                self.trace.add("decision", {"reasons": reasons, "error": str(exc)})
-                print(f"[actor] error: {exc}", flush=True)
+                error = f"{type(exc).__name__}: {exc}".strip(": ")
+                self.trace.add("decision", {"reasons": reasons, "error": error})
+                print(f"[actor] error: {error}", flush=True)
+                # (a timeout or a 502 passes: what the player said is asked about once more)
+                if not self.retried and any(r != "heartbeat" for r in reasons):
+                    self.retried = True
+                    self.reasons[:0] = [r for r in reasons if r != "heartbeat"]
+                    self.wake.set()
             if time.monotonic() > self.next_review and self.decisions:
                 self.next_review = time.monotonic() + REVIEW
                 self.ticket("review", decisions=self.decisions)

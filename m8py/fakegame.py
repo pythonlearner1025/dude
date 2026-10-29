@@ -281,8 +281,7 @@ class FakeGame:
             "in_combat": False,
             "on_radio": False,
             "state": (
-                "Kevin is waiting. {player}: close by ahead, unhurt, shields full. "
-                "Enemies: none."
+                "Kevin is waiting. {player}: close by ahead, unhurt, shields full. Enemies: none."
             ),
             "actions": [],
             **self.state,
