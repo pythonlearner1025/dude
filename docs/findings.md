@@ -442,7 +442,7 @@ commits. The game gained `go_point` (to the metre), health numbers and `HALO_STA
   stops short of walls (it failed 4 times aiming at the lifepod), a new `push` skill for "push
   them off the ridge", `flank` refuses targets more than 4 m above or below, `flank`/`attack` take
   the nearest enemy when none is named; tests added, skilltest ok, committed, results written.
-- *Open:* the coach worker (`m8py.coach`, `start-coach.sh`) needs `claude` signed in on b650s
-  (its 2.0.1 is old: 2.1.312 is current). Reflect's orders still pick up junk ("Stop.", Kevin's
+- *Coach worker:* Claude Code 2.1.312 in `~/.npm-global` with a one-year `setup-token` token;
+  `start-coach.sh` runs `m8py.coach` detached. Open: Reflect's orders still pick up junk ("Stop.", Kevin's
   own lines). Halo's AI does the fine control, so tactics are only as precise as two decisions a
   second and the companion's order set allow; the player-2 body is the next step for that.

@@ -23,7 +23,9 @@ CHAT_EXTRA="-np 2 -kvu" ./start-chat-qwen.sh          # Qwen3.5-9B + mmproj on :
 `~/m8work/notes/openrouter.env` (mode 600), which `start-m8py.sh` loads. Skills live in the git repo
 `~/m8work/kevin-skills` (seeded from `dude/kevin-skills`); tickets for the coach in
 `~/m8work/run/tickets`, with `<ticket>.log` and `<ticket>.result.md` beside each. The coach runs
-`claude -p` with Opus there, so Claude Code must be signed in (`claude`, then `/login`).
+`claude -p` with Opus there: the current Claude Code in `~/.npm-global/bin` (the one in
+`/usr/local` is 2.0.1), signed in with a one-year token from `claude setup-token` kept in
+`~/m8work/notes/claude-coach.env` (mode 600), which `start-coach.sh` loads.
 `HALO_START_LEVEL=a30 ./halo` plays a campaign level at once, for tests without the menus.
 
 **Co-op mode** (Kevin is player 2, played by Open-P2P; no Kev): `./start-stack-coop.sh` (Gemma,

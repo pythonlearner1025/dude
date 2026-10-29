@@ -57,7 +57,12 @@ def handle(ticket: Path, library: Path, model: str, timeout: float, claude: str 
     with ticket.with_suffix(".log").open("w") as log:
         try:
             done = subprocess.run(
-                command, cwd=library, stdout=log, stderr=subprocess.STDOUT, timeout=timeout
+                command,
+                cwd=library,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=timeout,
             )
             status = f"exit {done.returncode}"
         except subprocess.TimeoutExpired:
