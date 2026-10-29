@@ -144,12 +144,14 @@ class Play:
                     **{k: rounded(me.get(k)) for k in ("pos", "facing", "health", "shields")},
                     "activity": me.get("activity"),
                     "target": (me.get("target") or {}).get("label"),
+                    "vehicle": me.get("vehicle"),
                 },
                 "player": {
                     **{k: rounded(player.get(k)) for k in ("pos", "facing", "health", "shields")},
                     "aim": {k: rounded(aim.get(k)) for k in ("label", "distance_m", "pos")}
                     if aim
                     else None,
+                    "vehicle": player.get("vehicle"),
                 },
                 "enemies": [{k: rounded(e.get(k)) for k in keys} for e in nearest],
                 "running": self.doing(),

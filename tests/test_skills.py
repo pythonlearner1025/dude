@@ -232,7 +232,11 @@ PLAYED = [
         {
             "level": "a30",
             "kevin": {"pos": [0, 0, 0], "health": 1.0},
-            "player": {"pos": [0, -5, 0], "aim": None},
+            "player": {
+                "pos": [0, -5, 0],
+                "aim": None,
+                "vehicle": {"name": "warthog", "seat": "driver"},
+            },
             "enemies": [],
         },
     ),
@@ -276,6 +280,7 @@ def test_observation_packet(tmp_path):
     text = render(packet)
     assert 'PLAYER   "Kevin, take point."' in text and "=> lead (190 ms)" in text
     assert "SKILL    lead -> FAILED: blocked" in text and "HALO     go_point 0,6,0" in text
+    assert "health 100%, in a warthog (driver), aim nothing" in text
 
 
 def test_coach_looks_on_a_heartbeat(tmp_path):

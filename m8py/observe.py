@@ -69,6 +69,8 @@ def gist(state: dict[str, Any]) -> tuple:
         near(kevin.get("pos")),
         kevin.get("activity"),
         kevin.get("target"),
+        str(kevin.get("vehicle")),
+        str(player.get("vehicle")),
         tenth(kevin.get("health")),
         tenth(kevin.get("shields")),
         near(player.get("pos")),
@@ -244,12 +246,17 @@ def line(entry: dict[str, Any]) -> str:
         for e in enemies[:4]
     )
     target = f" at {kevin['target']}" if kevin.get("target") else ""
+
+    def riding(who: dict[str, Any]) -> str:
+        ride = who.get("vehicle") or {}
+        return f", in a {ride.get('name')} ({ride.get('seat')})" if ride else ""
+
     return (
         f"STATE    Kevin {point(kevin.get('pos'))} facing {kevin.get('facing', 0):.0f}°, "
         f"health {kevin.get('health', 1):.0%} shields {kevin.get('shields', 1):.0%}, "
-        f"{kevin.get('activity', '?')}{target}"
+        f"{kevin.get('activity', '?')}{target}{riding(kevin)}"
         f" | player {point(player.get('pos'))} facing {player.get('facing', 0):.0f}°, "
-        f"health {player.get('health', 1):.0%}, aim {aim.get('label', 'nothing')}"
+        f"health {player.get('health', 1):.0%}{riding(player)}, aim {aim.get('label', 'nothing')}"
         + (f" {aim.get('distance_m', 0):.0f} m" if aim else "")
         + f" | enemies: {near or 'none'}"
         + (f" | running {entry['running']}" if entry.get("running") else "")
