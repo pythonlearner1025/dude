@@ -475,6 +475,17 @@ commits. The game gained `go_point` (to the metre), health numbers and `HALO_STA
   ($0.41). Both Sonnet runs fixed "stop crouching" with a separate `stand_up` skill instead of
   the cause; the Opus runs made every movement skill stand Kevin up. Time is turns (12 to 40
   tool round trips), not tokens per second. The coach runs Opus at medium.
+- *Second playtest, with the watching coach (a30, 12:16-12:25, 213 decisions, median 200 ms):*
+  7 looks, 72-115 s each (about $4 in all), each committing a fix with a subject written for
+  the player: Cortana's radio no longer restarts `lead`; no more fire at a dropship's gun;
+  `clear_area` walks up to far or hidden enemies; `take_cover` fires back; `hold_fire` stops
+  sticking; `lead` keeps a heading and pushes ahead while the player walks. The player went from
+  "you keep stopping" to "you're a fucking menace". Kevin died twice (held fire in cover; walked
+  off a bridge on `lead`), both fixed by look 004. Found in it: m8py loaded the coach's edits as
+  they were made, before tests, so each fix went live a look late and the coach kept reporting
+  "the game runs one commit behind"; now only commits load. Kevin never really said what
+  changed (the change was one more feed line); now his next line must carry it. Frames (89, 24
+  KB) caused no state stalls; the only gaps were Kevin's deaths.
 - Open: Reflect's orders still pick up junk ("Stop.", Kevin's
   own lines). Halo's AI does the fine control, so tactics are only as precise as two decisions a
   second and the companion's order set allow; the player-2 body is the next step for that.
