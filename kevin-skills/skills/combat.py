@@ -48,6 +48,10 @@ def rush(k, target):
     while k.alive(target):
         if k.time - started > 20:
             return Failed("still alive after 20 s")
+        if k.me.get("health", 1) < 0.25:
+            return Failed("low health")
+        if k.me.get("shields", 1) < 0.4:
+            return Failed("shields down")
         k.rush(target)
         yield
     return Done("target down")
@@ -106,7 +110,7 @@ def clear_area(k):
         if enemy is None:
             return Done("area clear")
         result = yield from k.run("attack", target=f"{enemy['kind']}#{enemy['id']}")
-        if isinstance(result, Failed) and result.reason == "low health":
+        if isinstance(result, Failed) and result.reason in ("low health", "shields down"):
             return result
         yield
     return Failed("still enemies after 2 minutes")
@@ -138,7 +142,7 @@ def push(k, target=""):
         if enemy is None:
             return Done("pushed them back" if k.time > started else "no enemies to push")
         result = yield from k.run("rush", target=f"{enemy['kind']}#{enemy['id']}")
-        if target or (isinstance(result, Failed) and result.reason == "low health"):
+        if target or (isinstance(result, Failed) and result.reason in ("low health", "shields down")):
             return result
         yield
     return Failed("still enemies after a minute")

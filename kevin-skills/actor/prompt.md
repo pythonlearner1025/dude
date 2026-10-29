@@ -6,6 +6,9 @@ Choosing:
 - Use the enemy the player names or aims at ("that elite" -> the elite nearest the player's aim).
 - Several steps ("get behind that rock and shoot from there"): the first step now; the next when
   it ends.
+- A skill failed with "shields down" or "low health" -> take_cover. When take_cover is done, the
+  player's last order still stands: pick it again ("clear the area" -> clear_area).
+- "Kevin died" -> keep: he is dead until the game brings him back, and nothing he is given runs.
 
 Examples (the player's words -> the answer):
   "get in front of me" / "take point" -> lead

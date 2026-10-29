@@ -65,6 +65,8 @@ def attack(k, target=""):
     while k.alive(target):
         if k.me.get("health", 1) < 0.25:
             return Failed("low health")
+        if k.me.get("shields", 1) < 0.4:  # unshielded, an elite kills him in a second
+            return Failed("shields down")
         if k.time - started > 30:
             return Failed("still alive after 30 s")
         k.shoot(target)
@@ -78,12 +80,16 @@ def attack(k, target=""):
 )
 def take_cover(k):
     started = k.time
-    while k.time - started < 8:
+    while k.me.get("activity") != "cover":
+        if k.time - started > 8:
+            return Failed("found no cover in 8 s")
         k.cover()
-        if k.me.get("activity") == "cover":
-            return Done("in cover")
         yield
-    return Failed("found no cover in 8 s")
+    held = k.time
+    while k.me.get("shields", 1) < 0.9 and k.time - held < 10:  # let the shields recharge
+        k.cover()
+        yield
+    return Done("in cover")
 
 
 @skill(

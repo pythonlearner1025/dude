@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -69,12 +70,15 @@ def handle(ticket: Path, library: Path, model: str, timeout: float, claude: str 
     command += ["--permission-mode", "acceptEdits", "--add-dir", str(ticket.parent)]
     command += ["--add-dir", str(Path(trace).parent)] if trace else []
     command += ["--output-format", "stream-json", "--verbose", "--allowedTools", *TOOLS]
+    # (Claude's shell keeps its cd between commands: git must reach the library from anywhere)
+    env = {**os.environ, "GIT_DIR": str(library / ".git"), "GIT_WORK_TREE": str(library)}
     started = time.monotonic()
     with ticket.with_suffix(".log").open("w") as log:
         try:
             done = subprocess.run(
                 command,
                 cwd=library,
+                env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,

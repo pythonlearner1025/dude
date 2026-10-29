@@ -443,6 +443,15 @@ commits. The game gained `go_point` (to the metre), health numbers and `HALO_STA
   them off the ridge", `flank` refuses targets more than 4 m above or below, `flank`/`attack` take
   the nearest enemy when none is named; tests added, skilltest ok, committed, results written.
 - *Coach worker:* Claude Code 2.1.312 in `~/.npm-global` with a one-year `setup-token` token;
-  `start-coach.sh` runs `m8py.coach` detached. Open: Reflect's orders still pick up junk ("Stop.", Kevin's
+  `start-coach.sh` runs `m8py.coach` detached. Its first run timed out at 20 min: it loaded the
+  machine's personal CLAUDE.md (hand all work to Codex), skills and max effort, and sat 14 min in
+  a subagent. Isolated (project settings only, personal CLAUDE.md excluded, six tools, high
+  effort) and given tickets that list the latest decisions and skill endings, it closed the
+  a30 review ticket alone in 134 s, 28 turns, $0.54: Kevin died in `clear_area` going from 35%
+  shields to dead in a second, so `attack`/`rush` now break off at shields below 40% ("shields
+  down"), `take_cover` waits for the shields to recharge, and the actor takes cover on "shields
+  down" and keeps while Kevin is dead; a test for each. Its commit went to the wrong repo (its
+  shell had `cd`'d into `dude/logs`), so git now reaches the library through `GIT_DIR` and
+  `GIT_WORK_TREE`. Open: Reflect's orders still pick up junk ("Stop.", Kevin's
   own lines). Halo's AI does the fine control, so tactics are only as precise as two decisions a
   second and the companion's order set allow; the player-2 body is the next step for that.

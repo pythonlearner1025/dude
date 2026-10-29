@@ -220,3 +220,26 @@ def test_coach_takes_oldest_ticket_and_one_review(tmp_path):
     (tmp_path / "3-failure.result.md").write_text("done")
     assert [p.stem for p in pending(tmp_path)] == ["1-new_order", "4-review"]
     assert (tmp_path / "2-review.result.md").exists()
+
+
+def test_coach_commits_land_in_the_library(tmp_path):
+    import subprocess
+
+    from m8py.coach import handle
+
+    library, other = tmp_path / "library", tmp_path / "other"
+    for repo in (library, other):
+        (repo / "skills").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    ticket = tmp_path / "1-review.json"
+    ticket.write_text('{"trace": "%s"}' % (other / "trace.jsonl"))
+    claude = tmp_path / "claude"
+    claude.write_text(  # Claude's shell wandered into another repo, then committed
+        f"#!/bin/sh\ncd {other} && touch $GIT_WORK_TREE/skills/new.py && git add -A && "
+        "git -c user.name=c -c user.email=c@c commit -qm fix\n"
+    )
+    claude.chmod(0o755)
+    assert handle(ticket, library, "m", 30, str(claude))
+    log = ["git", "log", "--format=%s"]
+    assert subprocess.run(log, cwd=library, capture_output=True, text=True).stdout == "fix\n"
+    assert subprocess.run(log, cwd=other, capture_output=True, text=True).returncode != 0
